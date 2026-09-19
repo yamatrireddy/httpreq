@@ -1,0 +1,134 @@
+import { create } from 'zustand';
+
+export type ResponsePosition = 'right' | 'bottom';
+
+/**
+ * Application-level workspace UI preferences. They apply to every open and future request and are
+ * stored under their own key, separate from workspace/request data.
+ */
+export interface WorkspacePreferences {
+  responsePosition: ResponsePosition;
+  /** Request pane share of the workspace (0–1), remembered separately for each layout. */
+  splitRatio: Record<ResponsePosition, number>;
+  sidebarVisible: boolean;
+  statusBarVisible: boolean;
+}
+
+interface PreferencesState extends WorkspacePreferences {
+  setResponsePosition: (position: ResponsePosition) => void;
+  setSplitRatio: (position: ResponsePosition, ratio: number) => void;
+  toggleSidebar: () => void;
+  toggleStatusBar: () => void;
+}
+
+export const PREFERENCES_KEY = 'httpreq.preferences';
+export const DEFAULT_SPLIT_RATIO: Record<ResponsePosition, number> = { right: 0.5, bottom: 0.5 };
+export const MIN_SPLIT_RATIO = 0.1;
+export const MAX_SPLIT_RATIO = 0.9;
+
+export const defaultPreferences = (): WorkspacePreferences => ({
+  responsePosition: 'right',
+  splitRatio: { ...DEFAULT_SPLIT_RATIO },
+  sidebarVisible: true,
+  statusBarVisible: true,
+});
+
+export const clampRatio = (ratio: number) =>
+  Math.min(MAX_SPLIT_RATIO, Math.max(MIN_SPLIT_RATIO, ratio));
+
+const isRatio = (value: unknown): value is number =>
+  typeof value === 'number' && Number.isFinite(value);
+
+/** Parses stored preferences, keeping valid fields and falling back to defaults for the rest. */
+export const parsePreferences = (raw: string | null): WorkspacePreferences => {
+  const defaults = defaultPreferences();
+  if (!raw) return defaults;
+  let value: unknown;
+  try {
+    value = JSON.parse(raw);
+  } catch {
+    return defaults;
+  }
+  if (!value || typeof value !== 'object') return defaults;
+  const stored = value as Partial<Record<keyof WorkspacePreferences, unknown>>;
+  const ratios = (stored.splitRatio ?? {}) as Partial<Record<ResponsePosition, unknown>>;
+  return {
+    responsePosition:
+      stored.responsePosition === 'right' || stored.responsePosition === 'bottom'
+        ? stored.responsePosition
+        : defaults.responsePosition,
+    splitRatio: {
+      right: isRatio(ratios.right) ? clampRatio(ratios.right) : defaults.splitRatio.right,
+      bottom: isRatio(ratios.bottom) ? clampRatio(ratios.bottom) : defaults.splitRatio.bottom,
+    },
+    sidebarVisible:
+      typeof stored.sidebarVisible === 'boolean' ? stored.sidebarVisible : defaults.sidebarVisible,
+    statusBarVisible:
+      typeof stored.statusBarVisible === 'boolean'
+        ? stored.statusBarVisible
+        : defaults.statusBarVisible,
+  };
+};
+
+const storage = (): Storage | undefined => {
+  try {
+    return globalThis.localStorage;
+  } catch {
+    return undefined;
+  }
+};
+
+const load = () => {
+  try {
+    return parsePreferences(storage()?.getItem(PREFERENCES_KEY) ?? null);
+  } catch {
+    return defaultPreferences();
+  }
+};
+
+export const usePreferences = create<PreferencesState>((set) => ({
+  ...load(),
+  setResponsePosition: (responsePosition) => set({ responsePosition }),
+  setSplitRatio: (position, ratio) =>
+    set((state) => ({ splitRatio: { ...state.splitRatio, [position]: clampRatio(ratio) } })),
+  toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
+  toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
+}));
+
+const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
+  responsePosition: state.responsePosition,
+  splitRatio: state.splitRatio,
+  sidebarVisible: state.sidebarVisible,
+  statusBarVisible: state.statusBarVisible,
+});
+
+// Writes are debounced so bursts of changes (e.g. keyboard-resizing the splitter) cost one write.
+let pendingWrite: ReturnType<typeof setTimeout> | undefined;
+const persist = (state: WorkspacePreferences) => {
+  clearTimeout(pendingWrite);
+  pendingWrite = setTimeout(() => {
+    try {
+      storage()?.setItem(PREFERENCES_KEY, JSON.stringify(snapshot(state)));
+    } catch {
+      // Storage can be full or unavailable (private mode); preferences then last for the session.
+    }
+  }, 300);
+};
+
+usePreferences.subscribe((state, previous) => {
+  if (
+    state.responsePosition !== previous.responsePosition ||
+    state.splitRatio !== previous.splitRatio ||
+    state.sidebarVisible !== previous.sidebarVisible ||
+    state.statusBarVisible !== previous.statusBarVisible
+  ) {
+    persist(state);
+  }
+});
+
+// Keep other windows/tabs of the app in sync when they change the shared preferences.
+if (typeof window !== 'undefined') {
+  window.addEventListener('storage', (event) => {
+    if (event.key === PREFERENCES_KEY) usePreferences.setState(parsePreferences(event.newValue));
+  });
+}

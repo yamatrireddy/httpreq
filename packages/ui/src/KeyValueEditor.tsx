@@ -32,6 +32,7 @@ export function KeyValueEditor({
             placeholder={keyPlaceholder}
             value={item.key}
             onChange={(event) => update(item.id, { key: event.currentTarget.value })}
+            className="hr-mono"
             style={{ flex: 1 }}
           />
           <TextInput
@@ -39,6 +40,7 @@ export function KeyValueEditor({
             placeholder={valuePlaceholder}
             value={item.value}
             onChange={(event) => update(item.id, { value: event.currentTarget.value })}
+            className="hr-mono"
             style={{ flex: 1 }}
           />
           <Tooltip label="Remove row">

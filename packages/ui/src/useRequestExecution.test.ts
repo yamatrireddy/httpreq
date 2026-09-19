@@ -76,6 +76,7 @@ describe('useRequestExecution', () => {
       await expect(result.current.send(createEmptyRequest())).resolves.toEqual({
         kind: 'failed',
         message: 'Connection refused.',
+        code: 'NETWORK_ERROR',
       });
     });
   });

@@ -24,7 +24,12 @@ createRoot(document.getElementById('root')!).render(
       <Notifications position="bottom-right" />
       <QueryClientProvider client={queryClient}>
         <HashRouter>
-          <HttpReqApp runtime={runtime} repository={repository} />
+          <HttpReqApp
+            runtime={runtime}
+            repository={repository}
+            desktop={window.httpreq?.desktop}
+            version={__APP_VERSION__}
+          />
         </HashRouter>
       </QueryClientProvider>
     </MantineProvider>

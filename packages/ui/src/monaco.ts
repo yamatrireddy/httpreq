@@ -15,3 +15,12 @@ import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
 };
 
 loader.config({ monaco });
+
+// Monaco measures glyph widths once. The bundled monospace web font may finish loading after the
+// first editor mounts, so re-measure when it arrives to keep the cursor aligned with the text.
+if (typeof document !== 'undefined' && 'fonts' in document) {
+  void document.fonts
+    .load("13px 'JetBrains Mono'")
+    .then(() => monaco.editor.remeasureFonts())
+    .catch(() => undefined);
+}

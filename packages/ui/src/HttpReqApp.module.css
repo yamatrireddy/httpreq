@@ -1,70 +1,92 @@
 .header {
   border-bottom: 1px solid var(--mantine-color-default-border);
-  background: light-dark(rgba(255, 255, 255, 0.92), rgba(24, 24, 27, 0.94));
-  backdrop-filter: blur(12px);
-}
-.logo {
-  width: 30px;
-  height: 30px;
-  display: grid;
-  place-items: center;
-  color: white;
-  border-radius: var(--mantine-radius-md);
-  background: linear-gradient(135deg, var(--mantine-color-violet-5), var(--mantine-color-indigo-6));
-  box-shadow: 0 5px 18px rgba(112, 72, 232, 0.28);
-}
-.navbar {
-  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
-}
-.requestList {
-  overflow-y: auto;
-  flex: 1;
-}
-.main {
-  height: 100vh;
-  padding-top: 52px;
-  background: var(--mantine-color-body);
-  overflow: hidden;
-}
-.requestTabs {
-  height: 42px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
-  background: light-dark(var(--mantine-color-gray-0), var(--mantine-color-dark-8));
-}
-.tabList {
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  border-bottom: 0;
-}
-.requestArea {
-  height: calc(48vh - 47px);
-  min-height: 270px;
-  overflow: auto;
-  border-bottom: 1px solid var(--mantine-color-default-border);
-}
-.responseArea {
-  height: calc(52vh - 47px);
-  min-height: 260px;
-  overflow: hidden;
-}
-:global(.editor-frame) {
-  border: 1px solid var(--mantine-color-default-border);
-  border-radius: var(--mantine-radius-sm);
-  overflow: hidden;
-}
-:global(.request-config .mantine-Tabs-panel) {
-  min-height: 220px;
-}
-:global(.response-tabs .response-heading) {
-  min-height: 42px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
+  background: var(--hr-titlebar-bg);
+  overflow: visible;
 }
 
-@media (max-width: 48em) {
-  .requestArea {
-    height: calc(50vh - 47px);
-  }
-  .responseArea {
-    height: calc(50vh - 47px);
-  }
+.navbar {
+  background: var(--hr-chrome-bg);
+}
+
+.sectionLabel {
+  margin: 0;
+  padding: 6px 10px;
+  color: var(--mantine-color-dimmed);
+  font-size: 10.5px;
+  font-weight: 600;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.navLink {
+  min-height: 30px;
+  padding-block: 4px;
+  border-radius: var(--mantine-radius-xs);
+  font-size: 12.5px;
+}
+
+.requestList {
+  flex: 1;
+  min-height: 0;
+  overflow-y: auto;
+}
+
+/* The main area is exactly the space between title bar and status bar; only inner panes scroll,
+   so large responses can never make the window itself overflow. */
+.main {
+  display: flex;
+  flex-direction: column;
+  height: 100dvh;
+  min-height: 0;
+  overflow: hidden;
+  background: var(--mantine-color-body);
+}
+
+.workspace {
+  display: flex;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+}
+
+.requestArea {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.urlBar {
+  flex: 0 0 auto;
+}
+
+.responseArea {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+  min-width: 0;
+  overflow: hidden;
+  outline: none;
+}
+
+.responseArea:focus-visible {
+  box-shadow: inset 0 0 0 2px var(--mantine-primary-color-filled);
+}
+
+.footer {
+  border-top: 0;
+}
+
+:global(.editor-frame) {
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: 0;
+  overflow: hidden;
+}
+
+:global(.response-tabs .response-heading) {
+  min-height: 38px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
 }

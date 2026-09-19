@@ -85,10 +85,96 @@ export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: Serializ
 export const serializeError = (error: unknown, fallback: SerializedAppError): SerializedAppError =>
   error instanceof AppError ? { code: error.code, message: error.message } : fallback;
 
+/** Project documentation; the only external URL the desktop shell will open. */
+export const DOCUMENTATION_URL = 'https://github.com/yamatrireddy/httpreq';
+
+/**
+ * Lightweight reachability probe (an empty 204 response, as used for captive-portal detection).
+ * It is only requested on connectivity changes, never on a continuous timer while online.
+ */
+export const CONNECTIVITY_PROBE_URL = 'https://www.gstatic.com/generate_204';
+
+/** Window and edit actions the renderer may ask the Electron main process to perform. */
+export const WINDOW_ACTIONS = [
+  'undo',
+  'redo',
+  'cut',
+  'copy',
+  'paste',
+  'select-all',
+  'zoom-in',
+  'zoom-out',
+  'zoom-reset',
+  'toggle-fullscreen',
+  'toggle-devtools',
+  'quit',
+] as const;
+
+export type WindowAction = (typeof WINDOW_ACTIONS)[number];
+
+export const isWindowAction = (value: unknown): value is WindowAction =>
+  typeof value === 'string' && (WINDOW_ACTIONS as readonly string[]).includes(value);
+
+/** Application commands the native (macOS) menu forwards to the renderer. */
+export const MENU_COMMANDS = [
+  'request.new',
+  'request.close',
+  'request.save',
+  'request.send',
+  'request.duplicate',
+  'view.response-right',
+  'view.response-bottom',
+  'view.toggle-sidebar',
+  'view.toggle-status-bar',
+  'tools.settings',
+  'help.shortcuts',
+  'help.about',
+] as const;
+
+export type MenuCommand = (typeof MENU_COMMANDS)[number];
+
+export const isMenuCommand = (value: unknown): value is MenuCommand =>
+  typeof value === 'string' && (MENU_COMMANDS as readonly string[]).includes(value);
+
+export interface DesktopWindowState {
+  maximized: boolean;
+  fullscreen: boolean;
+}
+
+export interface AppInfo {
+  name: string;
+  version: string;
+  platform: string;
+  versions: { electron: string; chrome: string; node: string };
+}
+
+export interface TitleBarTheme {
+  /** `#rrggbb` background of the native window-controls overlay. */
+  color: string;
+  /** `#rrggbb` color of the native window-control symbols. */
+  symbolColor: string;
+}
+
+/** Desktop-shell operations exposed by the preload. Every call is validated in the main process. */
+export interface DesktopBridge {
+  readonly platform: string;
+  getAppInfo(): Promise<AppInfo>;
+  getWindowState(): Promise<DesktopWindowState>;
+  performAction(action: WindowAction): void;
+  setTitleBarTheme(theme: TitleBarTheme): void;
+  /** Opens an allow-listed documentation URL in the system browser. */
+  openExternal(url: string): void;
+  /** Resolves whether the internet is reachable, using a native lightweight probe. */
+  checkConnectivity(): Promise<boolean>;
+  onWindowStateChange(listener: (state: DesktopWindowState) => void): () => void;
+  onMenuCommand(listener: (command: MenuCommand) => void): () => void;
+}
+
 /** Operations the Electron preload exposes to the renderer as `window.httpreq`. */
 export interface HttpReqBridge {
   executeHttp(request: HttpRequest, executionId: string): Promise<IpcResult<HttpResponse>>;
   cancelHttp(executionId: string): void;
+  desktop?: DesktopBridge;
 }
 
 export interface WebSocketRuntime {

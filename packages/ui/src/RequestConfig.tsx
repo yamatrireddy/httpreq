@@ -4,6 +4,8 @@ import type { HttpRequest } from '@httpreq/shared';
 import { lazy, Suspense } from 'react';
 import { AuthEditor } from './AuthEditor';
 import { KeyValueEditor } from './KeyValueEditor';
+import { MONO_FONT_FAMILY } from './theme';
+import classes from './RequestConfig.module.css';
 
 const Editor = lazy(() => import('./LocalEditor'));
 
@@ -15,8 +17,8 @@ interface Props {
 export function RequestConfig({ request, onChange }: Props) {
   const colorScheme = useComputedColorScheme('dark');
   return (
-    <Tabs defaultValue="params" className="request-config">
-      <Tabs.List px="md">
+    <Tabs defaultValue="params" className={`request-config ${classes.root}`}>
+      <Tabs.List px="sm" className={classes.list}>
         <Tabs.Tab value="params">
           Params {request.params.length ? `(${request.params.length})` : ''}
         </Tabs.Tab>
@@ -26,15 +28,16 @@ export function RequestConfig({ request, onChange }: Props) {
         <Tabs.Tab value="body">Body</Tabs.Tab>
         <Tabs.Tab value="auth">Auth</Tabs.Tab>
       </Tabs.List>
-      <Tabs.Panel value="params" p="md">
+      <Tabs.Panel value="params" p="sm" className={classes.panel}>
         <KeyValueEditor items={request.params} onChange={(params) => onChange({ params })} />
       </Tabs.Panel>
-      <Tabs.Panel value="headers" p="md">
+      <Tabs.Panel value="headers" p="sm" className={classes.panel}>
         <KeyValueEditor items={request.headers} onChange={(headers) => onChange({ headers })} />
       </Tabs.Panel>
-      <Tabs.Panel value="body" p="md">
+      <Tabs.Panel value="body" p="sm" className={`${classes.panel} ${classes.bodyPanel}`}>
         <SegmentedControl
           mb="sm"
+          size="xs"
           value={request.body.type}
           onChange={(type) =>
             onChange({
@@ -50,7 +53,7 @@ export function RequestConfig({ request, onChange }: Props) {
           ]}
         />
         {request.body.type === 'json' ? (
-          <Box h={230} className="editor-frame">
+          <Box className={`editor-frame ${classes.editor}`}>
             <Suspense
               fallback={
                 <Center h="100%">
@@ -66,6 +69,7 @@ export function RequestConfig({ request, onChange }: Props) {
                 options={{
                   minimap: { enabled: false },
                   fontSize: 13,
+                  fontFamily: MONO_FONT_FAMILY,
                   scrollBeyondLastLine: false,
                   padding: { top: 12 },
                   automaticLayout: true,
@@ -79,7 +83,7 @@ export function RequestConfig({ request, onChange }: Props) {
           </Text>
         )}
       </Tabs.Panel>
-      <Tabs.Panel value="auth" p="md">
+      <Tabs.Panel value="auth" p="sm" className={classes.panel}>
         <AuthEditor auth={request.auth} onChange={(auth) => onChange({ auth })} />
       </Tabs.Panel>
     </Tabs>

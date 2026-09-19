@@ -42,6 +42,34 @@ npm run build
 npm run start --workspace=@httpreq/desktop
 ```
 
+To create installers with electron-builder (NSIS on Windows, DMG/ZIP on macOS, AppImage/deb on Linux; build on the target OS), run:
+
+```bash
+npm run package:desktop
+```
+
+Output goes to `apps/desktop/release/`. The app icon master is `apps/desktop/build/icon.svg`; after editing it, regenerate the `.ico`, `.icns`, Linux PNG set, runtime window icon and web favicon with `npm run icons --workspace=@httpreq/desktop`.
+
+## Workspace and keyboard
+
+- The response panel sits to the **right** of or **below** the request (View menu, the layout toggle at the end of the tab strip, or the status bar). Drag the splitter to resize, double-click it or press Enter on it to reset. Layout, split sizes, sidebar and status bar visibility are application-wide preferences stored under `httpreq.preferences`, separate from workspace data.
+- The status bar shows connectivity: `navigator.onLine` gives the instant signal and a single lightweight probe confirms reachability when it changes or a request fails with a network error. Nothing is polled while online; while offline it retries with backoff. Click the indicator to re-check.
+- A dot on a request tab marks edits not yet written to storage (autosave runs 250 ms after typing stops; Ctrl/Cmd+S writes immediately).
+
+| Action                    | Windows / Linux                                      | macOS           |
+| ------------------------- | ---------------------------------------------------- | --------------- |
+| Send request              | Ctrl+Enter                                           | ⌘↩              |
+| Send and focus response   | Ctrl+Shift+Enter                                     | ⇧⌘↩             |
+| Save                      | Ctrl+S                                               | ⌘S              |
+| New / close request       | Ctrl+T / Ctrl+W                                      | ⌘T / ⌘W         |
+| Next / previous request   | Ctrl+Tab / Ctrl+Shift+Tab (or Ctrl+PgDn / Ctrl+PgUp) | ⌃⇥ / ⌃⇧⇥        |
+| Go to request 1–9         | Ctrl+1 … Ctrl+9                                      | ⌘1 … ⌘9         |
+| Toggle sidebar / settings | Ctrl+B / Ctrl+,                                      | ⌘B / ⌘,         |
+| Request tab list          | ← → Home End, Enter/Space to open, Delete to close   | same            |
+| Application menu          | Alt, or Alt+F/E/V/R/T/H (desktop)                    | native menu bar |
+
+Browsers reserve some of these (for example Ctrl+T, Ctrl+W, Ctrl+Tab and Ctrl+1–9); they work in the desktop app. Help → Keyboard Shortcuts lists everything.
+
 ## Quality commands
 
 ```bash
@@ -59,7 +87,6 @@ npm run format:check
 - Each request tab can send and cancel independently; cancellation aborts the underlying request in both the browser and Electron runtimes.
 - Workspaces are stored in browser local storage. Authentication secret values remain in memory for the session and are deliberately removed before persistence.
 - Collections, environment interpolation, history, import/export, WebSockets, and desktop connectivity tools are extension points, not implemented features.
-- The build is not packaged into installers yet.
 
 ## Recommended next milestone
 

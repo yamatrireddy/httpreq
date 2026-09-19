@@ -1,19 +1,26 @@
 {
   "name": "@httpreq/desktop",
+  "productName": "HttpReq",
   "version": "0.1.0",
+  "description": "Local-first API client for REST requests.",
+  "author": "Yamatri Reddy",
+  "homepage": "https://github.com/yamatrireddy/httpreq",
+  "license": "GPL-3.0-only",
   "private": true,
   "type": "module",
   "main": "dist/main/main.js",
   "scripts": {
     "build": "vite build --config vite.main.config.ts && vite build --config vite.preload.config.ts",
     "dev": "npm run build && concurrently -k \"npm run dev --workspace=@httpreq/web\" \"wait-on tcp:5173 && cross-env VITE_DEV_SERVER_URL=http://localhost:5173 electron dist/main/main.js\"",
-    "start": "electron dist/main/main.js"
-  },
-  "dependencies": {
-    "@httpreq/api-client": "*",
-    "@httpreq/shared": "*"
+    "start": "electron dist/main/main.js",
+    "icons": "electron scripts/generate-icons.mjs",
+    "package": "electron-builder --config electron-builder.config.cjs",
+    "package:dir": "electron-builder --config electron-builder.config.cjs --dir"
   },
   "devDependencies": {
-    "electron": "^44.4.3"
+    "@httpreq/api-client": "*",
+    "@httpreq/shared": "*",
+    "electron": "^44.4.3",
+    "electron-builder": "^26.15.3"
   }
 }
