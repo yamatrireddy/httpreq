@@ -1,8 +1,16 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { AppError, type HttpRequest, type HttpResponse, type HttpRuntime } from '@httpreq/shared';
+import {
+  AppError,
+  type AppErrorCode,
+  type HttpRequest,
+  type HttpResponse,
+  type HttpRuntime,
+} from '@httpreq/shared';
 
 export type ExecutionOutcome =
-  { kind: 'success' } | { kind: 'cancelled' } | { kind: 'failed'; message: string };
+  | { kind: 'success' }
+  | { kind: 'cancelled' }
+  | { kind: 'failed'; message: string; code?: AppErrorCode };
 
 const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === 'AbortError';
@@ -39,10 +47,9 @@ export function useRequestExecution(
         return { kind: 'success' };
       } catch (error) {
         if (isAbortError(error)) return { kind: 'cancelled' };
-        return {
-          kind: 'failed',
-          message: error instanceof AppError ? error.message : 'An unexpected error occurred.',
-        };
+        return error instanceof AppError
+          ? { kind: 'failed', message: error.message, code: error.code }
+          : { kind: 'failed', message: 'An unexpected error occurred.' };
       } finally {
         // A newer send for the same tab owns the entry once it has replaced this controller.
         if (controllers.current.get(request.id) === controller) {

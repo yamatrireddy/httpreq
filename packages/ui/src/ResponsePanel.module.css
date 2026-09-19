@@ -1,0 +1,36 @@
+.root {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.meta {
+  flex: 0 1 auto;
+  min-width: 0;
+  overflow: hidden;
+}
+
+.bodyPanel {
+  display: flex;
+  flex-direction: column;
+  flex: 1;
+  min-height: 0;
+}
+
+.editor {
+  flex: 1;
+  min-height: 0;
+  border-inline: 0;
+  border-bottom: 0;
+}
+
+.headersPanel {
+  flex: 1;
+  min-height: 0;
+  overflow: auto;
+}
+
+.headersPanel td {
+  word-break: break-all;
+}

@@ -15,6 +15,8 @@ import { useComputedColorScheme } from '@mantine/core';
 import { IconBraces, IconClock, IconDatabase } from '@tabler/icons-react';
 import { lazy, Suspense, useMemo, useState } from 'react';
 import type { HttpResponse } from '@httpreq/shared';
+import { MONO_FONT_FAMILY } from './theme';
+import classes from './ResponsePanel.module.css';
 
 const Editor = lazy(() => import('./LocalEditor'));
 
@@ -51,7 +53,7 @@ export function ResponsePanel({
           </ThemeIcon>
           <Text fw={600}>{loading ? 'Sending request…' : 'Response will appear here'}</Text>
           <Text size="sm" c="dimmed">
-            Configure a request above and select Send.
+            Configure the request and select Send.
           </Text>
         </Stack>
       </Center>
@@ -59,29 +61,35 @@ export function ResponsePanel({
   }
 
   return (
-    <Tabs defaultValue="body" h="100%" className="response-tabs">
-      <Group justify="space-between" px="md" className="response-heading">
+    <Tabs defaultValue="body" className={`response-tabs ${classes.root}`}>
+      <Group justify="space-between" px="sm" gap="xs" wrap="nowrap" className="response-heading">
         <Tabs.List>
           <Tabs.Tab value="body">Body</Tabs.Tab>
           <Tabs.Tab value="headers">Headers ({Object.keys(response.headers).length})</Tabs.Tab>
         </Tabs.List>
-        <Group gap="xs">
-          <Badge color={response.status < 400 ? 'teal' : 'red'} variant="light">
+        <Group gap={6} wrap="nowrap" className={classes.meta} aria-label="Response summary">
+          <Badge color={response.status < 400 ? 'teal' : 'red'} variant="light" radius="xs">
             {response.status} {response.statusText}
           </Badge>
-          <Badge color="gray" variant="light" leftSection={<IconClock size={12} />}>
+          <Badge color="gray" variant="light" radius="xs" leftSection={<IconClock size={12} />}>
             {response.durationMs} ms
           </Badge>
-          <Badge color="gray" variant="light" leftSection={<IconDatabase size={12} />}>
+          <Badge color="gray" variant="light" radius="xs" leftSection={<IconDatabase size={12} />}>
             {formatBytes(response.sizeBytes)}
           </Badge>
         </Group>
       </Group>
-      <Tabs.Panel value="body" h="calc(100% - 42px)">
-        <Group justify="flex-end" px="md" py={6}>
-          <SegmentedControl size="xs" value={view} onChange={setView} data={['pretty', 'raw']} />
+      <Tabs.Panel value="body" className={classes.bodyPanel}>
+        <Group justify="flex-end" px="sm" py={6}>
+          <SegmentedControl
+            size="xs"
+            value={view}
+            onChange={setView}
+            data={['pretty', 'raw']}
+            aria-label="Body view"
+          />
         </Group>
-        <Box h="calc(100% - 42px)" className="editor-frame">
+        <Box className={`editor-frame ${classes.editor}`}>
           <Suspense
             fallback={
               <Center h="100%">
@@ -97,6 +105,7 @@ export function ResponsePanel({
                 readOnly: true,
                 minimap: { enabled: false },
                 fontSize: 13,
+                fontFamily: MONO_FONT_FAMILY,
                 scrollBeyondLastLine: false,
                 wordWrap: 'on',
                 automaticLayout: true,
@@ -105,8 +114,8 @@ export function ResponsePanel({
           </Suspense>
         </Box>
       </Tabs.Panel>
-      <Tabs.Panel value="headers" p="md">
-        <Table striped highlightOnHover withTableBorder>
+      <Tabs.Panel value="headers" p="sm" className={classes.headersPanel}>
+        <Table striped highlightOnHover withTableBorder className="hr-mono">
           <Table.Tbody>
             {Object.entries(response.headers).map(([key, value]) => (
               <Table.Tr key={key}>

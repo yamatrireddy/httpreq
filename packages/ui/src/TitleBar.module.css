@@ -1,0 +1,77 @@
+.titleBar {
+  display: flex;
+  align-items: stretch;
+  gap: 2px;
+  height: 100%;
+  padding-left: 8px;
+  background: var(--hr-titlebar-bg);
+  color: var(--hr-titlebar-fg);
+  user-select: none;
+}
+
+/* In Electron the whole bar drags the window (double-click maximises natively); every
+   interactive element opts out so it stays clickable. */
+.titleBar[data-desktop] {
+  -webkit-app-region: drag;
+}
+.titleBar[data-desktop] :is(button, a, input, [role='menubar'], [role='menu']) {
+  -webkit-app-region: no-drag;
+}
+
+.noDrag {
+  -webkit-app-region: no-drag;
+  align-self: center;
+}
+
+/* Room for the macOS traffic lights (hidden in full screen). */
+.trafficLights {
+  flex: 0 0 64px;
+}
+
+/* Room for the native minimise/maximise/close overlay on Windows and Linux. */
+.windowControls {
+  flex: 0 0 auto;
+  width: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)));
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  padding: 0 6px 0 2px;
+}
+
+.appName {
+  font-size: 13px;
+  font-weight: 600;
+  letter-spacing: 0.01em;
+}
+
+.title {
+  flex: 1 1 0;
+  min-width: 0;
+  align-self: center;
+  overflow: hidden;
+  padding: 0 12px;
+  font-size: 12px;
+  text-align: center;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+  opacity: 0.8;
+}
+
+.actions {
+  display: flex;
+  align-items: stretch;
+}
+
+.actions > button {
+  height: auto;
+  width: 34px;
+}
+
+@media (max-width: 40em) {
+  .title {
+    visibility: hidden;
+  }
+}
