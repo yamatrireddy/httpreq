@@ -60,6 +60,9 @@ const contentSecurityPolicy = [
   "connect-src 'self' http: https: ws: wss:",
 ].join('; ');
 
+/** Matches the renderer's body colour, so the window can be shown before the page paints. */
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#242424' : '#ffffff');
+
 const titleBarColors = () =>
   nativeTheme.shouldUseDarkColors
     ? { color: '#141414', symbolColor: '#c9c9c9' }
@@ -215,8 +218,11 @@ const createWindow = async () => {
     minHeight: 600,
     title: 'HttpReq',
     icon: isMac ? undefined : windowIcon,
-    backgroundColor: titleBarColors().color,
-    show: false,
+    backgroundColor: windowBackground(),
+    // Shown immediately rather than on `ready-to-show`: on Windows each Chromium child process
+    // (GPU, renderer) can take over a second to start, and a window that appears at once in the
+    // app's colours feels far faster than one that appears only when the page has painted.
+    show: true,
     // The React title bar hosts the menu; the OS keeps drawing the real window controls.
     titleBarStyle: 'hidden',
     ...(isMac
@@ -238,7 +244,6 @@ const createWindow = async () => {
   window.on('enter-full-screen', notifyState);
   window.on('leave-full-screen', notifyState);
 
-  window.once('ready-to-show', () => window.show());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   // The renderer is a single-page app; never let it navigate away from the bundled UI.
   window.webContents.on('will-navigate', (event, url) => {
