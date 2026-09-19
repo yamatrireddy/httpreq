@@ -1,5 +1,11 @@
-import type { AuthConfig, HttpRequest, HttpResponse, HttpRuntime } from '@httpreq/shared';
-import { AppError } from '@httpreq/shared';
+import type {
+  AuthConfig,
+  HttpReqBridge,
+  HttpRequest,
+  HttpResponse,
+  HttpRuntime,
+} from '@httpreq/shared';
+import { AppError, createId } from '@httpreq/shared';
 
 export interface PreparedRequest {
   url: string;
@@ -100,15 +106,45 @@ export class BrowserHttpRuntime implements HttpRuntime {
 
 declare global {
   interface Window {
-    httpreq?: { executeHttp(request: HttpRequest): Promise<HttpResponse> };
+    httpreq?: HttpReqBridge;
   }
 }
+
+const abortError = () => new DOMException('The request was cancelled.', 'AbortError');
 
 export class ElectronHttpRuntime implements HttpRuntime {
   readonly kind = 'electron' as const;
 
-  execute(request: HttpRequest): Promise<HttpResponse> {
-    if (!window.httpreq) throw new AppError('NETWORK_ERROR', 'Electron bridge is unavailable.');
-    return window.httpreq.executeHttp(request);
+  execute(request: HttpRequest, signal?: AbortSignal): Promise<HttpResponse> {
+    const bridge = window.httpreq;
+    if (!bridge) {
+      return Promise.reject(new AppError('NETWORK_ERROR', 'Electron bridge is unavailable.'));
+    }
+    if (signal?.aborted) return Promise.reject(abortError());
+
+    const executionId = createId();
+    return new Promise<HttpResponse>((resolve, reject) => {
+      // Reject immediately on abort; the main process cancels its native request in parallel.
+      const onAbort = () => {
+        bridge.cancelHttp(executionId);
+        reject(abortError());
+      };
+      signal?.addEventListener('abort', onAbort, { once: true });
+      bridge
+        .executeHttp(request, executionId)
+        .then(
+          (result) =>
+            result.ok
+              ? resolve(result.value)
+              : reject(new AppError(result.error.code, result.error.message)),
+          (cause: unknown) =>
+            reject(
+              new AppError('NETWORK_ERROR', 'The desktop bridge could not execute the request.', {
+                cause,
+              }),
+            ),
+        )
+        .finally(() => signal?.removeEventListener('abort', onAbort));
+    });
   }
 }

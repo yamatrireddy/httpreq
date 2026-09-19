@@ -4,7 +4,9 @@
 
 The shared UI depends only on `HttpRuntime` and `WorkspaceRepository`. It never imports Electron or Node APIs. At startup, the web entry point selects `BrowserHttpRuntime`; the same renderer selects `ElectronHttpRuntime` when the preload bridge is present.
 
-The Electron renderer has `contextIsolation`, sandboxing, and disabled Node integration. The preload exposes one typed request operation. The main process validates incoming data and permits only HTTP and HTTPS URLs before using Electron native networking. New native capabilities should follow this narrow interface-and-adapter pattern.
+The Electron renderer has `contextIsolation`, sandboxing, and disabled Node integration. The preload exposes the typed `HttpReqBridge` (`executeHttp` and `cancelHttp`). The main process validates incoming data and permits only HTTP and HTTPS URLs before using Electron native networking. Handlers never throw across IPC, because Electron strips custom error classes and their codes; they return an `IpcResult` envelope that `ElectronHttpRuntime` turns back into an `AppError`. In-flight native requests are keyed by sender and execution id, so a window can cancel only its own requests.
+
+The production CSP forbids inline scripts. When `VITE_DEV_SERVER_URL` is set, `'unsafe-inline'` is added to `script-src` so Vite's React Fast Refresh preamble can run. New native capabilities should follow this narrow interface-and-adapter pattern.
 
 ## Package responsibilities
 

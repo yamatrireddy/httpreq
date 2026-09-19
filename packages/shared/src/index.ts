@@ -74,6 +74,23 @@ export class AppError extends Error {
   }
 }
 
+/** Plain-object error form that survives Electron IPC structured cloning. */
+export interface SerializedAppError {
+  code: AppErrorCode;
+  message: string;
+}
+
+export type IpcResult<T> = { ok: true; value: T } | { ok: false; error: SerializedAppError };
+
+export const serializeError = (error: unknown, fallback: SerializedAppError): SerializedAppError =>
+  error instanceof AppError ? { code: error.code, message: error.message } : fallback;
+
+/** Operations the Electron preload exposes to the renderer as `window.httpreq`. */
+export interface HttpReqBridge {
+  executeHttp(request: HttpRequest, executionId: string): Promise<IpcResult<HttpResponse>>;
+  cancelHttp(executionId: string): void;
+}
+
 export interface WebSocketRuntime {
   connect(config: unknown): Promise<unknown>;
 }

@@ -56,7 +56,7 @@ npm run format:check
 - Only `none` and JSON request bodies are implemented; XML, text, forms, multipart, and binary are next-scope features.
 - OAuth 2.0 is not implemented yet.
 - Browser requests must satisfy CORS. Electron uses native networking and is not CORS-constrained.
-- Electron IPC cancellation is not wired yet; browser requests support `AbortController` cancellation.
+- Each request tab can send and cancel independently; cancellation aborts the underlying request in both the browser and Electron runtimes.
 - Workspaces are stored in browser local storage. Authentication secret values remain in memory for the session and are deliberately removed before persistence.
 - Collections, environment interpolation, history, import/export, WebSockets, and desktop connectivity tools are extension points, not implemented features.
 - The build is not packaged into installers yet.
