@@ -1,0 +1,66 @@
+import { Alert, SegmentedControl, Stack, Text } from '@mantine/core';
+import { IconInfoCircle } from '@tabler/icons-react';
+import { useState } from 'react';
+import type { HttpRequest, RequestScripts } from '@httpreq/shared';
+import { CodeEditor } from './CodeEditor';
+import classes from './RequestEditor.module.css';
+
+const STAGES: { value: keyof RequestScripts; label: string; hint: string }[] = [
+  {
+    value: 'preRequest',
+    label: 'Pre-request',
+    hint: 'Runs before the request is sent, e.g. to compute a signature or set a variable.',
+  },
+  {
+    value: 'postResponse',
+    label: 'Post-response',
+    hint: 'Runs after the response arrives, e.g. to store a token from the body.',
+  },
+  { value: 'tests', label: 'Tests', hint: 'Assertions about the response, e.g. its status or JSON shape.' },
+];
+
+interface Props {
+  request: HttpRequest;
+  onChange: (patch: Partial<HttpRequest>) => void;
+}
+
+/**
+ * Script editing for the three lifecycle stages. Execution is intentionally not available yet:
+ * it will run in a sandbox behind the pipeline's `ScriptRunner` seam.
+ */
+export function ScriptsPanel({ request, onChange }: Props) {
+  const [stage, setStage] = useState<keyof RequestScripts>('preRequest');
+  const current = STAGES.find((item) => item.value === stage)!;
+  return (
+    <Stack gap="xs" className={classes.bodyPanel}>
+      <Alert variant="light" color="gray" icon={<IconInfoCircle size={16} />} p="xs">
+        <Text size="xs">
+          Script execution is coming soon. Scripts are saved with the request but are not run when
+          it is sent.
+        </Text>
+      </Alert>
+      <SegmentedControl
+        size="xs"
+        aria-label="Script stage"
+        value={stage}
+        onChange={(value) => setStage(value as keyof RequestScripts)}
+        data={STAGES.map(({ value, label }) => ({
+          value,
+          label: request.scripts[value].trim() ? `${label} ●` : label,
+        }))}
+        className={classes.stagePicker}
+      />
+      <Text size="xs" c="dimmed">
+        {current.hint}
+      </Text>
+      <CodeEditor
+        key={stage}
+        className={classes.editor}
+        language="javascript"
+        ariaLabel={`${current.label} script`}
+        value={request.scripts[stage]}
+        onChange={(value) => onChange({ scripts: { ...request.scripts, [stage]: value } })}
+      />
+    </Stack>
+  );
+}

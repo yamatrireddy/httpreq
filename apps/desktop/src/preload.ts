@@ -33,6 +33,7 @@ const desktop: DesktopBridge = {
   performAction: (action) => ipcRenderer.send('window:action', action),
   setTitleBarTheme: (theme) => ipcRenderer.send('window:title-bar-theme', theme),
   openExternal: (url) => ipcRenderer.send('shell:open-external', url),
+  openAuthorizationUrl: (url) => ipcRenderer.send('shell:open-authorization-url', url),
   checkConnectivity: () => ipcRenderer.invoke('net:check'),
   onWindowStateChange: (listener) => subscribe('window:state-changed', listener, isWindowState),
   onMenuCommand: (listener) => subscribe<MenuCommand>('menu:command', listener, isMenuCommand),

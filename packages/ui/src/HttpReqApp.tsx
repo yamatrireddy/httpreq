@@ -1,69 +1,60 @@
-import {
-  AppShell,
-  Badge,
-  Box,
-  Button,
-  Divider,
-  Group,
-  NavLink,
-  Select,
-  Stack,
-  Text,
-  TextInput,
-  useMantineColorScheme,
-} from '@mantine/core';
+import { AppShell, Box, Button, Center, Group, Stack, Text, ThemeIcon, useMantineColorScheme } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useDisclosure } from '@mantine/hooks';
-import {
-  IconBolt,
-  IconFolder,
-  IconHistory,
-  IconPlus,
-  IconServer,
-  IconVariable,
-} from '@tabler/icons-react';
+import { IconBox, IconPlus, IconSend } from '@tabler/icons-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
+  buildRequest,
+  createVariableResolver,
+  executeRequest,
+  getAuthProvider,
+  requestOAuthTokens,
+  toCurl,
+  type PipelineContext,
+} from '@httpreq/api-client';
+import {
+  createId,
   DOCUMENTATION_URL,
   type DesktopBridge,
-  type HttpMethod,
+  type HistoryEntry,
+  type HistoryRepository,
   type HttpRequest,
   type HttpRuntime,
   type MenuCommand,
+  type OAuth2Auth,
   type WorkspaceRepository,
 } from '@httpreq/shared';
-import { DEFAULT_WORKSPACE_ID } from '@httpreq/workspace';
 import './app.css';
+import { readAttachment } from './attachments';
+import { AuthServicesContext, type AuthServices } from './auth/authServices';
 import type { CommandMap } from './commands';
 import { useShortcutManager } from './commands';
+import { confirmAction } from './confirm';
+import { ConfirmDialog } from './ConfirmDialog';
 import {
   browserConnectivityProbe,
   reportRequestConnectivity,
   useConnectivityMonitor,
 } from './connectivity';
 import { AboutDialog, SettingsDialog, ShortcutsDialog } from './Dialogs';
+import { RequestEditor } from './editor/RequestEditor';
+import { EnvironmentSelect } from './EnvironmentSelect';
+import { Sidebar } from './explorer/Sidebar';
 import { LayoutToggle } from './LayoutToggle';
 import type { MenuDefinition } from './MenuBar';
-import { methodColor, methods, REQUEST_PANEL_ID, requestTabId } from './methods';
+import { REQUEST_PANEL_ID, requestTabId } from './methods';
 import { DEFAULT_SPLIT_RATIO, usePreferences } from './preferences';
-import { RequestConfig } from './RequestConfig';
 import { RequestTabs } from './RequestTabs';
 import { ResponsePanel } from './ResponsePanel';
 import { formatChord } from './shortcuts';
 import { SplitPane } from './SplitPane';
 import { StatusBar } from './StatusBar';
-import { useWorkbenchStore } from './store';
+import { activeEnvironment, editableRequest, useWorkbenchStore } from './store';
 import { TitleBar } from './TitleBar';
+import { usePersistence } from './usePersistence';
 import { useRequestExecution } from './useRequestExecution';
+import { VariableContext, type VariableScope } from './variableContext';
 import classes from './HttpReqApp.module.css';
-
-const sidebarItems = [
-  { label: 'Collections', icon: IconFolder, active: true },
-  { label: 'Environments', icon: IconVariable },
-  { label: 'History', icon: IconHistory },
-  { label: 'WebSockets', icon: IconBolt, soon: true },
-  { label: 'SSH', icon: IconServer, soon: true },
-];
 
 /** Must match the Electron window-controls overlay height (`TITLE_BAR_HEIGHT` in desktop). */
 const TITLE_BAR_HEIGHT = 36;
@@ -75,6 +66,7 @@ type Dialog = 'settings' | 'shortcuts' | 'about';
 interface Props {
   runtime: HttpRuntime;
   repository: WorkspaceRepository;
+  history: HistoryRepository;
   /** Desktop shell bridge; absent in the browser. */
   desktop?: DesktopBridge;
   version?: string;
@@ -86,6 +78,7 @@ const menus: MenuDefinition[] = [
     mnemonic: 'f',
     entries: [
       { command: 'request.new' },
+      { command: 'collection.new' },
       { separator: true },
       { command: 'request.save' },
       { separator: true },
@@ -132,6 +125,7 @@ const menus: MenuDefinition[] = [
     entries: [
       { command: 'request.send' },
       { command: 'request.send-focus' },
+      { command: 'request.focus-url' },
       { separator: true },
       { command: 'request.save' },
       { command: 'request.duplicate' },
@@ -157,41 +151,47 @@ const menus: MenuDefinition[] = [
   },
 ];
 
-export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
+const pipelineContext = (): PipelineContext => {
+  const { workspace } = useWorkbenchStore.getState();
+  return { workspace, environment: activeEnvironment(workspace), readFile: readAttachment };
+};
+
+export function HttpReqApp({ runtime, repository, history, desktop, version }: Props) {
   const [opened, { toggle, close: closeNav }] = useDisclosure();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const { toggleColorScheme } = useMantineColorScheme();
-  const {
-    workspace,
-    activeRequestId,
-    responses,
-    unsavedIds,
-    setWorkspace,
-    setActiveRequest,
-    cycleRequest,
-    updateRequest,
-    addRequest,
-    duplicateRequest,
-    moveRequest,
-    closeRequest,
-    setResponse,
-    markSaved,
-  } = useWorkbenchStore();
+  const { loaded, saveRequest, recordHistory, clearHistory } = usePersistence(repository, history);
+
+  const workspaceName = useWorkbenchStore((state) => state.workspace.name);
+  const requests = useWorkbenchStore((state) => state.workspace.requests);
+  const openIds = useWorkbenchStore((state) => state.workspace.openRequestIds);
+  const environments = useWorkbenchStore((state) => state.workspace.environments);
+  const activeEnvironmentId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
+  const drafts = useWorkbenchStore((state) => state.drafts);
+  const activeId = useWorkbenchStore((state) => state.activeRequestId);
+  const responses = useWorkbenchStore((state) => state.responses);
+  const setActiveRequest = useWorkbenchStore((state) => state.setActiveRequest);
+  const cycleRequest = useWorkbenchStore((state) => state.cycleRequest);
+  const moveTab = useWorkbenchStore((state) => state.moveTab);
+  const createRequest = useWorkbenchStore((state) => state.createRequest);
+  const createCollection = useWorkbenchStore((state) => state.createCollection);
+  const duplicateNode = useWorkbenchStore((state) => state.duplicateNode);
+  const setResponse = useWorkbenchStore((state) => state.setResponse);
+
   const responsePosition = usePreferences((state) => state.responsePosition);
   const splitRatio = usePreferences((state) => state.splitRatio[state.responsePosition]);
   const setSplitRatio = usePreferences((state) => state.setSplitRatio);
   const sidebarVisible = usePreferences((state) => state.sidebarVisible);
+  const sidebarWidth = usePreferences((state) => state.sidebarWidth);
   const statusBarVisible = usePreferences((state) => state.statusBarVisible);
   const setResponsePosition = usePreferences((state) => state.setResponsePosition);
   const toggleSidebar = usePreferences((state) => state.toggleSidebar);
   const toggleStatusBar = usePreferences((state) => state.toggleStatusBar);
-  const execution = useRequestExecution(runtime, setResponse);
-  const { send: executeRequest, cancel: cancelRequest } = execution;
+
+  const execution = useRequestExecution();
+  const { send: runExecution, cancel: cancelRequest } = execution;
   const responseRef = useRef<HTMLElement>(null);
-  const request = useMemo(
-    () => workspace.requests.find((item) => item.id === activeRequestId),
-    [workspace.requests, activeRequestId],
-  );
+  const urlRef = useRef<HTMLInputElement>(null);
   const mac = useMemo(
     () =>
       desktop
@@ -206,99 +206,200 @@ export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
   );
   useConnectivityMonitor(probe);
 
-  useEffect(() => {
-    repository.getWorkspace(DEFAULT_WORKSPACE_ID).then((saved) => saved && setWorkspace(saved));
-  }, [repository, setWorkspace]);
+  /* Tabs show the saved name and the edited method, keyed and ordered by id. */
+  const tabs = useMemo(() => {
+    const byId = new Map(requests.map((request) => [request.id, request]));
+    return openIds.flatMap((id) => {
+      const saved = byId.get(id);
+      if (!saved) return [];
+      const draft = drafts[id];
+      return [{ id, name: saved.name, method: draft?.method ?? saved.method, url: draft?.url ?? saved.url }];
+    });
+  }, [requests, openIds, drafts]);
+  const unsavedIds = useMemo(() => new Set(Object.keys(drafts)), [drafts]);
+  const activeName = tabs.find((tab) => tab.id === activeId)?.name;
 
-  const persist = useCallback(
-    (snapshot: typeof workspace) =>
-      repository.saveWorkspace(snapshot).then(
-        () => markSaved(snapshot),
-        // Leave the unsaved marker in place; the next edit or Save retries.
-        () => undefined,
-      ),
-    [repository, markSaved],
+  /* Variables of the active environment, for highlighting, tooltips and completion. */
+  const variableScope = useMemo<VariableScope>(() => {
+    const environment = environments.find((item) => item.id === activeEnvironmentId) ?? null;
+    return { resolver: createVariableResolver(environment), environmentName: environment?.name ?? null };
+  }, [environments, activeEnvironmentId]);
+
+  const authServices = useMemo<AuthServices>(
+    () => ({
+      requestTokens: (config: OAuth2Auth, options) => {
+        const resolver = createVariableResolver(activeEnvironment(useWorkbenchStore.getState().workspace));
+        const resolved = getAuthProvider(config).resolve(config, { resolve: resolver.resolve, now: Date.now });
+        return requestOAuthTokens(resolved, (prepared) => runtime.execute(prepared), options);
+      },
+      setVariable: (key, value) => useWorkbenchStore.getState().setEnvironmentVariable(key, value, true),
+      openUrl: (url) => {
+        if (desktop) desktop.openAuthorizationUrl(url);
+        else window.open(url, '_blank', 'noopener,noreferrer');
+      },
+      resolve: (text) => variableScope.resolver.resolve(text),
+    }),
+    [runtime, desktop, variableScope],
   );
 
-  const pendingSave = useRef<number | undefined>(undefined);
-  useEffect(() => {
-    const handle = window.setTimeout(() => void persist(workspace), 250);
-    pendingSave.current = handle;
-    return () => window.clearTimeout(handle);
-  }, [persist, workspace]);
-
-  /** Writes the workspace immediately instead of waiting for the autosave debounce. */
-  const saveNow = useCallback(() => {
-    window.clearTimeout(pendingSave.current);
-    void persist(useWorkbenchStore.getState().workspace);
-  }, [persist]);
+  const buildCurl = useCallback(async (request: HttpRequest) => {
+    const built = await buildRequest(request, {
+      ...pipelineContext(),
+      // cURL references files by name, so their bytes are not needed.
+      readFile: async () => new Uint8Array(),
+      resolverOptions: { keepSecrets: true },
+    });
+    return toCurl(built.prepared, request.body.binary?.name);
+  }, []);
 
   const send = useCallback(
     async (focusResponse = false) => {
-      const { workspace: current, activeRequestId: activeId } = useWorkbenchStore.getState();
-      const target = current.requests.find((item) => item.id === activeId);
-      if (!target || !target.url.trim()) {
-        notifications.show({
-          color: 'red',
-          title: 'URL required',
-          message: 'Enter an absolute URL before sending.',
-        });
-        return;
-      }
+      const state = useWorkbenchStore.getState();
+      const request = editableRequest(state, state.activeRequestId);
+      if (!request) return;
       if (focusResponse) responseRef.current?.focus();
-      const outcome = await executeRequest(target);
+      const context = pipelineContext();
+      const outcome = await runExecution(request.id, (signal) =>
+        executeRequest(request, context, runtime, signal),
+      );
+      const entry: HistoryEntry = {
+        id: createId(),
+        requestId: request.id,
+        name: request.name,
+        method: request.method,
+        // The unresolved template, so resolved secrets never reach history.
+        url: request.url,
+        status: null,
+        statusText: '',
+        durationMs: null,
+        sizeBytes: null,
+        timestamp: new Date().toISOString(),
+      };
       if (outcome.kind === 'success') {
+        const { response, built } = outcome.value;
+        setResponse(request.id, response);
         reportRequestConnectivity('success');
+        recordHistory({
+          ...entry,
+          status: response.status,
+          statusText: response.statusText,
+          durationMs: response.durationMs,
+          sizeBytes: response.sizeBytes,
+        });
+        const notes = [...built.warnings];
+        if (response.truncated) {
+          notes.push(`The response was cut at ${request.settings.responseSizeLimitMb} MB (Settings › Response size limit).`);
+        }
+        if (notes.length) notifications.show({ color: 'yellow', title: 'Sent with warnings', message: notes.join(' ') });
       } else if (outcome.kind === 'cancelled') {
         notifications.show({ color: 'yellow', message: 'Request cancelled.' });
       } else {
-        if (outcome.code && NETWORK_ERRORS.has(outcome.code)) {
-          reportRequestConnectivity('network-error');
-        }
+        if (outcome.code && NETWORK_ERRORS.has(outcome.code)) reportRequestConnectivity('network-error');
+        recordHistory({ ...entry, error: outcome.message });
         notifications.show({ color: 'red', title: 'Request failed', message: outcome.message });
       }
     },
-    [executeRequest],
+    [runExecution, runtime, setResponse, recordHistory],
   );
 
-  const closeActiveRequest = useCallback(
-    (id: string) => {
+  const saveActive = useCallback(async () => {
+    const id = useWorkbenchStore.getState().activeRequestId;
+    if (!id) return true;
+    const ok = await saveRequest(id);
+    if (!ok) {
+      notifications.show({
+        color: 'red',
+        title: 'Save failed',
+        message: 'The request could not be written to local storage. Your changes are kept; try again.',
+      });
+    }
+    return ok;
+  }, [saveRequest]);
+
+  /** Closes a tab, asking first when it has unsaved changes. */
+  const closeTab = useCallback(
+    async (id: string) => {
+      const state = useWorkbenchStore.getState();
+      if (state.drafts[id]) {
+        const name = state.workspace.requests.find((request) => request.id === id)?.name ?? 'this request';
+        const choice = await confirmAction({
+          title: 'Unsaved changes',
+          message: `Save the changes to “${name}” before closing it?`,
+          confirmLabel: 'Save',
+          alternateLabel: 'Don’t save',
+        });
+        if (choice === 'cancel') return;
+        if (choice === 'confirm' && !(await saveRequest(id))) {
+          notifications.show({ color: 'red', title: 'Save failed', message: 'The tab was kept open.' });
+          return;
+        }
+        if (choice === 'alternate') useWorkbenchStore.getState().discardDraft(id);
+      }
       cancelRequest(id);
-      closeRequest(id);
+      useWorkbenchStore.getState().closeRequest(id);
     },
-    [cancelRequest, closeRequest],
+    [cancelRequest, saveRequest],
   );
+
+  const newRequest = useCallback(() => {
+    createRequest(null);
+    requestAnimationFrame(() => urlRef.current?.focus());
+  }, [createRequest]);
 
   const openDocumentation = useCallback(() => {
     if (desktop) desktop.openExternal(DOCUMENTATION_URL);
     else window.open(DOCUMENTATION_URL, '_blank', 'noopener,noreferrer');
   }, [desktop]);
 
-  const requestCount = workspace.requests.length;
+  const tabCount = tabs.length;
   const commands = useMemo<CommandMap>(() => {
     const active = () => useWorkbenchStore.getState().activeRequestId;
     const map: CommandMap = {
-      'request.new': { label: 'New Request', shortcut: [{ key: 't', mod: true }], run: addRequest },
-      'request.save': { label: 'Save', shortcut: [{ key: 's', mod: true }], run: saveNow },
+      'request.new': { label: 'New Request', shortcut: [{ key: 't', mod: true }], run: newRequest },
+      'collection.new': { label: 'New Collection', run: () => void createCollection() },
+      'request.save': {
+        label: 'Save',
+        shortcut: [{ key: 's', mod: true }],
+        run: () => void saveActive(),
+        disabled: tabCount === 0,
+      },
       'request.close': {
         label: 'Close Request',
         shortcut: [{ key: 'w', mod: true }],
-        run: () => closeActiveRequest(active()),
-        disabled: requestCount <= 1,
+        run: () => {
+          const id = active();
+          if (id) void closeTab(id);
+        },
+        disabled: tabCount === 0,
       },
       'request.send': {
         label: 'Send Request',
         shortcut: [{ key: 'Enter', mod: true }],
         run: () => void send(),
+        disabled: tabCount === 0,
       },
       'request.send-focus': {
         label: 'Send and Focus Response',
         shortcut: [{ key: 'Enter', mod: true, shift: true }],
         run: () => void send(true),
+        disabled: tabCount === 0,
+      },
+      'request.focus-url': {
+        label: 'Focus URL',
+        shortcut: [{ key: 'l', mod: true }],
+        run: () => {
+          urlRef.current?.focus();
+          urlRef.current?.select();
+        },
+        disabled: tabCount === 0,
       },
       'request.duplicate': {
         label: 'Duplicate Request',
-        run: () => duplicateRequest(active()),
+        run: () => {
+          const id = active();
+          if (id) duplicateNode(id);
+        },
+        disabled: tabCount === 0,
       },
       'request.next': {
         label: 'Next Request',
@@ -307,7 +408,7 @@ export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
           { key: 'PageDown', ctrl: true },
         ],
         run: () => cycleRequest(1),
-        disabled: requestCount <= 1,
+        disabled: tabCount <= 1,
         repeatable: true,
       },
       'request.previous': {
@@ -317,7 +418,7 @@ export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
           { key: 'PageUp', ctrl: true },
         ],
         run: () => cycleRequest(-1),
-        disabled: requestCount <= 1,
+        disabled: tabCount <= 1,
         repeatable: true,
       },
       'view.response-right': {
@@ -356,8 +457,8 @@ export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
         label: `Go to Request ${position}`,
         shortcut: [{ key: String(position), code: `Digit${position}`, mod: true }],
         run: () => {
-          const target = useWorkbenchStore.getState().workspace.requests[position - 1];
-          if (target) setActiveRequest(target.id);
+          const target = useWorkbenchStore.getState().workspace.openRequestIds[position - 1];
+          if (target) setActiveRequest(target);
         },
       };
     }
@@ -426,11 +527,12 @@ export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
     }
     return map;
   }, [
-    addRequest,
-    saveNow,
-    closeActiveRequest,
+    newRequest,
+    createCollection,
+    saveActive,
+    closeTab,
     send,
-    duplicateRequest,
+    duplicateNode,
     cycleRequest,
     setActiveRequest,
     setResponsePosition,
@@ -438,7 +540,7 @@ export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
     toggleStatusBar,
     toggleColorScheme,
     openDocumentation,
-    requestCount,
+    tabCount,
     responsePosition,
     sidebarVisible,
     statusBarVisible,
@@ -459,210 +561,160 @@ export function HttpReqApp({ runtime, repository, desktop, version }: Props) {
     return chord ? formatChord(chord, mac) : undefined;
   };
 
-  if (!request) return null;
-  const patch = (value: Partial<HttpRequest>) => updateRequest(request.id, value);
-  const sending = execution.isSending(request.id);
+  if (!loaded) return null;
+  const sending = activeId ? execution.isSending(activeId) : false;
 
   return (
-    <AppShell
-      header={{ height: TITLE_BAR_HEIGHT }}
-      navbar={{
-        width: 232,
-        breakpoint: 'sm',
-        collapsed: { mobile: !opened, desktop: !sidebarVisible },
-      }}
-      footer={statusBarVisible ? { height: STATUS_BAR_HEIGHT } : undefined}
-      padding={0}
-      transitionDuration={120}
-    >
-      {/* Above the navbar (101) so menus drop down over the sidebar; below modals (200). */}
-      <AppShell.Header className={classes.header} zIndex={150}>
-        <TitleBar
-          title={`${request.name} — ${workspace.name}`}
-          menus={menus}
-          commands={commands}
-          mac={mac}
-          desktop={desktop}
-          sidebarVisible={sidebarVisible}
-          mobileNavOpened={opened}
-          onToggleMobileNav={toggle}
-        />
-      </AppShell.Header>
-
-      <AppShell.Navbar p="xs" className={classes.navbar} aria-label="Sidebar">
-        <Text className={classes.sectionLabel} component="h2">
-          Workspace
-        </Text>
-        <Stack gap={1}>
-          {sidebarItems.map((item) => (
-            <NavLink
-              key={item.label}
-              label={item.label}
-              active={item.active}
-              leftSection={<item.icon size={16} />}
-              rightSection={
-                item.soon ? (
-                  <Badge size="xs" variant="light" color="gray">
-                    Soon
-                  </Badge>
-                ) : undefined
-              }
-              disabled={item.soon}
-              className={classes.navLink}
+    <VariableContext.Provider value={variableScope}>
+      <AuthServicesContext.Provider value={authServices}>
+        <AppShell
+          header={{ height: TITLE_BAR_HEIGHT }}
+          navbar={{
+            width: sidebarWidth,
+            breakpoint: 'sm',
+            collapsed: { mobile: !opened, desktop: !sidebarVisible },
+          }}
+          footer={statusBarVisible ? { height: STATUS_BAR_HEIGHT } : undefined}
+          padding={0}
+          transitionDuration={120}
+        >
+          {/* Above the navbar (101) so menus drop down over the sidebar; below modals (200). */}
+          <AppShell.Header className={classes.header} zIndex={150}>
+            <TitleBar
+              title={activeName ? `${activeName} — ${workspaceName}` : workspaceName}
+              menus={menus}
+              commands={commands}
+              mac={mac}
+              desktop={desktop}
+              sidebarVisible={sidebarVisible}
+              mobileNavOpened={opened}
+              onToggleMobileNav={toggle}
             />
-          ))}
-        </Stack>
-        <Divider my="xs" />
-        <Text className={classes.sectionLabel} component="h2">
-          Requests
-        </Text>
-        <Stack gap={1} className={classes.requestList}>
-          {workspace.requests.map((item) => (
-            <NavLink
-              key={item.id}
-              label={item.name}
-              active={item.id === request.id}
-              aria-current={item.id === request.id ? 'page' : undefined}
-              onClick={() => {
-                setActiveRequest(item.id);
-                closeNav();
-              }}
-              className={classes.navLink}
-              leftSection={
-                <Text span size="xs" fw={700} c={methodColor[item.method]} w={46}>
-                  {item.method}
-                </Text>
+          </AppShell.Header>
+
+          <AppShell.Navbar className={classes.navbar} aria-label="Sidebar">
+            <Sidebar onClearHistory={clearHistory} onNavigate={closeNav} />
+          </AppShell.Navbar>
+
+          <AppShell.Main className={classes.main}>
+            <RequestTabs
+              requests={tabs}
+              activeId={activeId ?? ''}
+              unsavedIds={unsavedIds}
+              onActivate={setActiveRequest}
+              onClose={(id) => void closeTab(id)}
+              onNew={newRequest}
+              onMove={moveTab}
+              newShortcut={shortcutLabel('request.new')}
+              closeShortcut={shortcutLabel('request.close')}
+              actions={
+                <>
+                  <EnvironmentSelect />
+                  <LayoutToggle />
+                </>
               }
             />
-          ))}
-        </Stack>
-        <Button
-          mt="xs"
-          variant="subtle"
-          color="gray"
-          size="xs"
-          justify="flex-start"
-          leftSection={<IconPlus size={15} />}
-          onClick={addRequest}
-        >
-          New request
-        </Button>
-      </AppShell.Navbar>
 
-      <AppShell.Main className={classes.main}>
-        <RequestTabs
-          requests={workspace.requests}
-          activeId={request.id}
-          unsavedIds={unsavedIds}
-          onActivate={setActiveRequest}
-          onClose={closeActiveRequest}
-          onNew={addRequest}
-          onMove={moveRequest}
-          newShortcut={shortcutLabel('request.new')}
-          closeShortcut={shortcutLabel('request.close')}
-          actions={<LayoutToggle />}
-        />
-
-        <div
-          role="tabpanel"
-          id={REQUEST_PANEL_ID}
-          aria-labelledby={requestTabId(request.id)}
-          className={classes.workspace}
-        >
-          <SplitPane
-            layout={responsePosition}
-            ratio={splitRatio}
-            defaultRatio={DEFAULT_SPLIT_RATIO[responsePosition]}
-            onRatioChange={(ratio) => setSplitRatio(responsePosition, ratio)}
-            firstId="request-editor"
-            label="Resize request and response panels"
-            first={
-              <section id="request-editor" aria-label="Request" className={classes.requestArea}>
-                <Group gap="xs" p="sm" wrap="nowrap" className={classes.urlBar}>
-                  <Select
-                    aria-label="HTTP method"
-                    w={112}
-                    value={request.method}
-                    data={methods}
-                    allowDeselect={false}
-                    onChange={(method) => patch({ method: method as HttpMethod })}
-                    styles={{
-                      input: {
-                        color: `var(--mantine-color-${methodColor[request.method]}-6)`,
-                        fontWeight: 700,
-                      },
-                    }}
-                  />
-                  <TextInput
-                    aria-label="Request URL"
-                    placeholder="https://api.example.com/users"
-                    value={request.url}
-                    onChange={(event) => patch({ url: event.currentTarget.value })}
-                    className="hr-mono"
-                    style={{ flex: 1, minWidth: 0 }}
-                  />
-                  {sending ? (
-                    <Button
-                      color="red"
-                      variant="light"
-                      onClick={() => execution.cancel(request.id)}
-                    >
-                      Cancel
-                    </Button>
-                  ) : (
-                    <Button
-                      onClick={() => void send()}
-                      title={`Send (${shortcutLabel('request.send')})`}
-                    >
-                      Send
-                    </Button>
-                  )}
-                </Group>
-                <RequestConfig request={request} onChange={patch} />
-              </section>
-            }
-            second={
-              <Box
-                component="section"
-                ref={responseRef}
-                tabIndex={-1}
-                aria-label="Response"
-                aria-busy={sending}
-                className={classes.responseArea}
+            {activeId && tabs.some((tab) => tab.id === activeId) ? (
+              <div
+                role="tabpanel"
+                id={REQUEST_PANEL_ID}
+                aria-labelledby={requestTabId(activeId)}
+                className={classes.workspace}
               >
-                <ResponsePanel response={responses[request.id]} loading={sending} />
-              </Box>
-            }
-          />
-        </div>
-      </AppShell.Main>
+                <SplitPane
+                  layout={responsePosition}
+                  ratio={splitRatio}
+                  defaultRatio={DEFAULT_SPLIT_RATIO[responsePosition]}
+                  onRatioChange={(ratio) => setSplitRatio(responsePosition, ratio)}
+                  firstId="request-editor"
+                  label="Resize request and response panels"
+                  first={
+                    <section id="request-editor" aria-label="Request" className={classes.requestArea}>
+                      <RequestEditor
+                        key={activeId}
+                        requestId={activeId}
+                        desktop={!!desktop}
+                        sending={sending}
+                        onSend={() => void send()}
+                        onCancel={() => execution.cancel(activeId)}
+                        onSave={() => void saveActive()}
+                        urlRef={urlRef}
+                        buildCurl={buildCurl}
+                        shortcuts={{
+                          send: shortcutLabel('request.send'),
+                          save: shortcutLabel('request.save'),
+                          focusUrl: shortcutLabel('request.focus-url'),
+                        }}
+                      />
+                    </section>
+                  }
+                  second={
+                    <Box
+                      component="section"
+                      ref={responseRef}
+                      tabIndex={-1}
+                      aria-label="Response"
+                      aria-busy={sending}
+                      className={classes.responseArea}
+                    >
+                      <ResponsePanel response={responses[activeId]} loading={sending} />
+                    </Box>
+                  }
+                />
+              </div>
+            ) : (
+              <Center className={classes.workspace}>
+                <Stack align="center" gap="xs">
+                  <ThemeIcon variant="light" size={44} radius="xl">
+                    <IconSend size={22} />
+                  </ThemeIcon>
+                  <Text fw={600}>No request open</Text>
+                  <Text size="sm" c="dimmed">
+                    Open a request from the explorer, or start a new one.
+                  </Text>
+                  <Group gap="xs" mt="xs">
+                    <Button leftSection={<IconPlus size={15} />} onClick={newRequest}>
+                      New request
+                    </Button>
+                    <Button variant="default" leftSection={<IconBox size={15} />} onClick={() => createCollection()}>
+                      New collection
+                    </Button>
+                  </Group>
+                </Stack>
+              </Center>
+            )}
+          </AppShell.Main>
 
-      {statusBarVisible && (
-        <AppShell.Footer className={classes.footer}>
-          <StatusBar
-            workspaceName={workspace.name}
-            runtimeLabel={desktop ? 'Desktop' : 'Browser'}
+          {statusBarVisible && (
+            <AppShell.Footer className={classes.footer}>
+              <StatusBar
+                workspaceName={workspaceName}
+                runtimeLabel={desktop ? 'Desktop' : 'Browser'}
+                version={version}
+                sending={sending}
+              />
+            </AppShell.Footer>
+          )}
+
+          <SettingsDialog opened={dialog === 'settings'} onClose={() => setDialog(null)} />
+          <ShortcutsDialog
+            opened={dialog === 'shortcuts'}
+            onClose={() => setDialog(null)}
+            commands={commands}
+            mac={mac}
+            web={!desktop}
+          />
+          <AboutDialog
+            opened={dialog === 'about'}
+            onClose={() => setDialog(null)}
             version={version}
-            sending={sending}
+            desktop={desktop}
+            onOpenDocumentation={openDocumentation}
           />
-        </AppShell.Footer>
-      )}
-
-      <SettingsDialog opened={dialog === 'settings'} onClose={() => setDialog(null)} />
-      <ShortcutsDialog
-        opened={dialog === 'shortcuts'}
-        onClose={() => setDialog(null)}
-        commands={commands}
-        mac={mac}
-        web={!desktop}
-      />
-      <AboutDialog
-        opened={dialog === 'about'}
-        onClose={() => setDialog(null)}
-        version={version}
-        desktop={desktop}
-        onOpenDocumentation={openDocumentation}
-      />
-    </AppShell>
+          <ConfirmDialog />
+        </AppShell>
+      </AuthServicesContext.Provider>
+    </VariableContext.Provider>
   );
 }

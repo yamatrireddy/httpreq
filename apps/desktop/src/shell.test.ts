@@ -2,6 +2,7 @@
 import { describe, expect, it } from 'vitest';
 import {
   isAllowedExternalUrl,
+  isAuthorizationUrl,
   isTitleBarTheme,
   isTrustedRendererUrl,
   nextZoomLevel,
@@ -9,6 +10,15 @@ import {
 } from './shell';
 
 describe('desktop shell IPC validation', () => {
+  it('opens only plain web URLs as OAuth authorization pages', () => {
+    expect(isAuthorizationUrl('https://auth.example.com/authorize?client_id=x')).toBe(true);
+    expect(isAuthorizationUrl('http://localhost:8080/authorize')).toBe(true);
+    expect(isAuthorizationUrl('file:///etc/passwd')).toBe(false);
+    expect(isAuthorizationUrl('javascript:alert(1)')).toBe(false);
+    expect(isAuthorizationUrl('https://user:pass@example.com')).toBe(false);
+    expect(isAuthorizationUrl(null)).toBe(false);
+  });
+
   it('only opens the project documentation externally', () => {
     expect(isAllowedExternalUrl('https://github.com/yamatrireddy/httpreq')).toBe(true);
     expect(

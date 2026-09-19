@@ -26,6 +26,7 @@ import { executeHttp } from './http';
 import { buildMacMenu } from './menu';
 import {
   isAllowedExternalUrl,
+  isAuthorizationUrl,
   isTitleBarTheme,
   isTrustedRendererUrl,
   nextZoomLevel,
@@ -78,6 +79,23 @@ const windowState = (window: BrowserWindow): DesktopWindowState => ({
   fullscreen: window.isFullScreen(),
 });
 
+/**
+ * API requests run in their own sessions rather than the app's default session: they keep a
+ * separate cookie jar, and the app's CSP header injection never touches API responses. Requests
+ * that opt out of TLS verification use a second session whose certificate check accepts
+ * everything, so the relaxed check can never leak into verified requests.
+ */
+let verifiedSession: Electron.Session | undefined;
+let unverifiedSession: Electron.Session | undefined;
+const apiSession = (verifyTls: boolean): Electron.Session => {
+  if (verifyTls) return (verifiedSession ??= session.fromPartition('persist:httpreq-api'));
+  if (!unverifiedSession) {
+    unverifiedSession = session.fromPartition('persist:httpreq-api-insecure');
+    unverifiedSession.setCertificateVerifyProc((_request, callback) => callback(0));
+  }
+  return unverifiedSession;
+};
+
 // In-flight native requests, keyed by sender so one window cannot cancel another's requests.
 const inFlight = new Map<string, AbortController>();
 const inFlightKey = (event: { sender: { id: number } }, executionId: string) =>
@@ -93,7 +111,9 @@ ipcMain.handle(
     const controller = new AbortController();
     inFlight.set(key, controller);
     try {
-      return await executeHttp(request, controller.signal, (url, init) => net.fetch(url, init));
+      return await executeHttp(request, controller.signal, (url, init, options) =>
+        apiSession(options.verifyTls).fetch(url, init),
+      );
     } finally {
       if (inFlight.get(key) === controller) inFlight.delete(key);
     }
@@ -166,6 +186,10 @@ ipcMain.on('window:title-bar-theme', (event, theme: unknown) => {
 
 ipcMain.on('shell:open-external', (event, url: unknown) => {
   if (isTrustedSender(event) && isAllowedExternalUrl(url)) void shell.openExternal(url);
+});
+
+ipcMain.on('shell:open-authorization-url', (event, url: unknown) => {
+  if (isTrustedSender(event) && isAuthorizationUrl(url)) void shell.openExternal(url);
 });
 
 ipcMain.handle('net:check', async (event): Promise<boolean> => {

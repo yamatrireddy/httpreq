@@ -1,29 +1,35 @@
-export type HttpMethod = 'GET' | 'POST' | 'PUT' | 'PATCH' | 'DELETE';
+export * from './model';
+import type { HistoryEntry, HttpMethod, HttpRequest, Workspace } from './model';
 
-export interface KeyValueItem {
-  id: string;
-  key: string;
-  value: string;
-  enabled: boolean;
+export type PreparedBody =
+  | { kind: 'text'; text: string }
+  | { kind: 'bytes'; bytes: Uint8Array }
+  | { kind: 'multipart'; parts: PreparedPart[] };
+
+export type PreparedPart =
+  | { name: string; value: string }
+  | { name: string; fileName: string; contentType: string; bytes: Uint8Array };
+
+/** Transport options derived from request settings; each runtime honours what it can. */
+export interface PreparedOptions {
+  followRedirects: boolean;
+  verifyTls: boolean;
+  sendCookies: boolean;
+  /** 0 reads the whole body. */
+  maxResponseBytes: number;
 }
 
-export type RequestBody = { type: 'none'; content: '' } | { type: 'json'; content: string };
-
-export type AuthConfig =
-  | { type: 'none' }
-  | { type: 'basic'; username: string; password: string }
-  | { type: 'bearer'; token: string }
-  | { type: 'api-key'; key: string; value: string; location: 'header' | 'query' };
-
-export interface HttpRequest {
-  id: string;
-  name: string;
+/**
+ * The final, fully resolved request produced by the execution pipeline: variables substituted,
+ * authorization applied, body encoded. It is the only request shape that crosses into a runtime
+ * (and over Electron IPC), so saved requests are never mutated with resolved values.
+ */
+export interface PreparedRequest {
   method: HttpMethod;
   url: string;
-  params: KeyValueItem[];
-  headers: KeyValueItem[];
-  body: RequestBody;
-  auth: AuthConfig;
+  headers: Record<string, string>;
+  body?: PreparedBody;
+  options: PreparedOptions;
 }
 
 export interface HttpResponse {
@@ -34,24 +40,29 @@ export interface HttpResponse {
   contentType: string;
   durationMs: number;
   sizeBytes: number;
+  /** The body was cut at the request's response size limit. */
+  truncated?: boolean;
 }
 
 export interface HttpRuntime {
   readonly kind: 'browser' | 'electron';
-  execute(request: HttpRequest, signal?: AbortSignal): Promise<HttpResponse>;
-}
-
-export interface Workspace {
-  id: string;
-  name: string;
-  requests: HttpRequest[];
-  updatedAt: string;
+  execute(request: PreparedRequest, signal?: AbortSignal): Promise<HttpResponse>;
 }
 
 export interface WorkspaceRepository {
   getWorkspace(id: string): Promise<Workspace | null>;
   saveWorkspace(workspace: Workspace): Promise<void>;
   deleteWorkspace(id: string): Promise<void>;
+  /** Unsaved edits of open requests, kept so they survive a reload. */
+  getDrafts(workspaceId: string): Promise<Record<string, HttpRequest>>;
+  saveDrafts(workspaceId: string, drafts: Record<string, HttpRequest>): Promise<void>;
+}
+
+export interface HistoryRepository {
+  list(workspaceId: string): Promise<HistoryEntry[]>;
+  /** Adds an entry and returns the retained list, newest first. */
+  add(workspaceId: string, entry: HistoryEntry): Promise<HistoryEntry[]>;
+  clear(workspaceId: string): Promise<void>;
 }
 
 export type AppErrorCode =
@@ -122,6 +133,7 @@ export const MENU_COMMANDS = [
   'request.save',
   'request.send',
   'request.duplicate',
+  'request.focus-url',
   'view.response-right',
   'view.response-bottom',
   'view.toggle-sidebar',
@@ -164,6 +176,8 @@ export interface DesktopBridge {
   setTitleBarTheme(theme: TitleBarTheme): void;
   /** Opens an allow-listed documentation URL in the system browser. */
   openExternal(url: string): void;
+  /** Opens an OAuth 2.0 authorization page (http/https only) in the system browser. */
+  openAuthorizationUrl(url: string): void;
   /** Resolves whether the internet is reachable, using a native lightweight probe. */
   checkConnectivity(): Promise<boolean>;
   onWindowStateChange(listener: (state: DesktopWindowState) => void): () => void;
@@ -172,7 +186,7 @@ export interface DesktopBridge {
 
 /** Operations the Electron preload exposes to the renderer as `window.httpreq`. */
 export interface HttpReqBridge {
-  executeHttp(request: HttpRequest, executionId: string): Promise<IpcResult<HttpResponse>>;
+  executeHttp(request: PreparedRequest, executionId: string): Promise<IpcResult<HttpResponse>>;
   cancelHttp(executionId: string): void;
   desktop?: DesktopBridge;
 }
@@ -198,16 +212,3 @@ export type Feature = 'rest' | 'websocket' | 'ssh' | 'file-transfer' | 'tunnel';
 export interface EntitlementService {
   hasFeature(feature: Feature): boolean;
 }
-
-export const createId = () => crypto.randomUUID();
-
-export const createEmptyRequest = (): HttpRequest => ({
-  id: createId(),
-  name: 'Untitled Request',
-  method: 'GET',
-  url: '',
-  params: [],
-  headers: [],
-  body: { type: 'none', content: '' },
-  auth: { type: 'none' },
-});

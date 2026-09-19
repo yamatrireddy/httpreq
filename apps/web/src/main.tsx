@@ -8,11 +8,12 @@ import { ColorSchemeScript, MantineProvider } from '@mantine/core';
 import { Notifications } from '@mantine/notifications';
 import { QueryClient, QueryClientProvider } from '@tanstack/react-query';
 import { BrowserHttpRuntime, ElectronHttpRuntime } from '@httpreq/api-client';
-import { LocalWorkspaceRepository } from '@httpreq/storage';
+import { LocalHistoryRepository, LocalWorkspaceRepository } from '@httpreq/storage';
 import { HttpReqApp, httpReqTheme } from '@httpreq/ui';
 
 const runtime = window.httpreq ? new ElectronHttpRuntime() : new BrowserHttpRuntime();
 const repository = new LocalWorkspaceRepository();
+const history = new LocalHistoryRepository();
 const queryClient = new QueryClient({
   defaultOptions: { queries: { retry: 1, staleTime: 30_000 } },
 });
@@ -27,6 +28,7 @@ createRoot(document.getElementById('root')!).render(
           <HttpReqApp
             runtime={runtime}
             repository={repository}
+            history={history}
             desktop={window.httpreq?.desktop}
             version={__APP_VERSION__}
           />

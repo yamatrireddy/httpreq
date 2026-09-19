@@ -13,12 +13,14 @@ describe('parsePreferences', () => {
       responsePosition: 'bottom',
       splitRatio: { right: 0.3, bottom: 5 },
       sidebarVisible: false,
+      sidebarWidth: 9999,
       statusBarVisible: false,
     });
     expect(parsePreferences(stored)).toEqual({
       responsePosition: 'bottom',
       splitRatio: { right: 0.3, bottom: 0.9 },
       sidebarVisible: false,
+      sidebarWidth: 560,
       statusBarVisible: false,
     });
   });

@@ -37,6 +37,20 @@ export const isAllowedExternalUrl = (value: unknown): value is string => {
   );
 };
 
+/**
+ * OAuth 2.0 authorization pages the user asked to open. Only plain web URLs without embedded
+ * credentials are accepted, so the renderer cannot launch other protocol handlers.
+ */
+export const isAuthorizationUrl = (value: unknown): value is string => {
+  if (typeof value !== 'string' || value.length > 8192) return false;
+  try {
+    const url = new URL(value);
+    return (url.protocol === 'https:' || url.protocol === 'http:') && !url.username && !url.password;
+  } catch {
+    return false;
+  }
+};
+
 export const nextZoomLevel = (current: number, direction: 'in' | 'out' | 'reset'): number => {
   if (direction === 'reset') return 0;
   const next = current + (direction === 'in' ? ZOOM_STEP : -ZOOM_STEP);
