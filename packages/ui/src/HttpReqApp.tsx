@@ -31,14 +31,14 @@ import {
   IconVariable,
   IconX,
 } from '@tabler/icons-react';
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import type { HttpMethod, HttpRequest, HttpRuntime } from '@httpreq/shared';
-import { AppError } from '@httpreq/shared';
 import type { WorkspaceRepository } from '@httpreq/shared';
 import { DEFAULT_WORKSPACE_ID } from '@httpreq/workspace';
 import { RequestConfig } from './RequestConfig';
 import { ResponsePanel } from './ResponsePanel';
 import { useWorkbenchStore } from './store';
+import { useRequestExecution } from './useRequestExecution';
 import classes from './HttpReqApp.module.css';
 
 const methods: HttpMethod[] = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE'];
@@ -66,8 +66,6 @@ interface Props {
 export function HttpReqApp({ runtime, repository }: Props) {
   const [opened, { toggle }] = useDisclosure();
   const { colorScheme, toggleColorScheme } = useMantineColorScheme();
-  const [sending, setSending] = useState(false);
-  const abortRef = useRef<AbortController | null>(null);
   const {
     workspace,
     activeRequestId,
@@ -79,6 +77,7 @@ export function HttpReqApp({ runtime, repository }: Props) {
     closeRequest,
     setResponse,
   } = useWorkbenchStore();
+  const execution = useRequestExecution(runtime, setResponse);
   const request = useMemo(
     () => workspace.requests.find((item) => item.id === activeRequestId),
     [workspace.requests, activeRequestId],
@@ -102,25 +101,17 @@ export function HttpReqApp({ runtime, repository }: Props) {
       });
       return;
     }
-    abortRef.current = new AbortController();
-    setSending(true);
-    try {
-      setResponse(request.id, await runtime.execute(request, abortRef.current.signal));
-    } catch (error) {
-      if (error instanceof DOMException && error.name === 'AbortError') {
-        notifications.show({ color: 'yellow', message: 'Request cancelled.' });
-      } else {
-        const message = error instanceof AppError ? error.message : 'An unexpected error occurred.';
-        notifications.show({ color: 'red', title: 'Request failed', message });
-      }
-    } finally {
-      setSending(false);
-      abortRef.current = null;
+    const outcome = await execution.send(request);
+    if (outcome.kind === 'cancelled') {
+      notifications.show({ color: 'yellow', message: 'Request cancelled.' });
+    } else if (outcome.kind === 'failed') {
+      notifications.show({ color: 'red', title: 'Request failed', message: outcome.message });
     }
   };
 
   if (!request) return null;
   const patch = (value: Partial<HttpRequest>) => updateRequest(request.id, value);
+  const sending = execution.isSending(request.id);
 
   return (
     <AppShell
@@ -237,6 +228,7 @@ export function HttpReqApp({ runtime, repository }: Props) {
                         color="gray"
                         onClick={(event) => {
                           event.stopPropagation();
+                          execution.cancel(item.id);
                           closeRequest(item.id);
                         }}
                       >
@@ -289,7 +281,7 @@ export function HttpReqApp({ runtime, repository }: Props) {
               style={{ flex: 1 }}
             />
             {sending ? (
-              <Button color="red" variant="light" onClick={() => abortRef.current?.abort()}>
+              <Button color="red" variant="light" onClick={() => execution.cancel(request.id)}>
                 Cancel
               </Button>
             ) : (

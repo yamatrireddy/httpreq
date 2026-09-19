@@ -1,0 +1,10 @@
+# Normalize to LF in the repository and working tree on every OS, so Prettier's
+# endOfLine setting holds regardless of core.autocrlf.
+* text=auto eol=lf
+
+*.png binary
+*.jpg binary
+*.ico binary
+*.icns binary
+*.woff binary
+*.woff2 binary
