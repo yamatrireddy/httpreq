@@ -1,14 +1,8 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import {
-  AppError,
-  type AppErrorCode,
-  type HttpRequest,
-  type HttpResponse,
-  type HttpRuntime,
-} from '@httpreq/shared';
+import { AppError, type AppErrorCode } from '@httpreq/shared';
 
-export type ExecutionOutcome =
-  | { kind: 'success' }
+export type ExecutionOutcome<T> =
+  | { kind: 'success'; value: T }
   | { kind: 'cancelled' }
   | { kind: 'failed'; message: string; code?: AppErrorCode };
 
@@ -16,13 +10,11 @@ const isAbortError = (error: unknown) =>
   error instanceof DOMException && error.name === 'AbortError';
 
 /**
- * Runs requests through the runtime with one AbortController per request tab, so tabs can send
- * concurrently and cancelling one tab never affects another.
+ * Runs request executions with one AbortController per request tab, so tabs can send
+ * concurrently and cancelling one tab never affects another. What "running" means (the
+ * pipeline and runtime) is supplied by the caller.
  */
-export function useRequestExecution(
-  runtime: HttpRuntime,
-  onResponse: (requestId: string, response: HttpResponse) => void,
-) {
+export function useRequestExecution() {
   const controllers = useRef(new Map<string, AbortController>());
   const [pending, setPending] = useState<ReadonlySet<string>>(() => new Set());
 
@@ -36,29 +28,27 @@ export function useRequestExecution(
   }, []);
 
   const send = useCallback(
-    async (request: HttpRequest): Promise<ExecutionOutcome> => {
-      controllers.current.get(request.id)?.abort();
+    async <T,>(requestId: string, run: (signal: AbortSignal) => Promise<T>): Promise<ExecutionOutcome<T>> => {
+      controllers.current.get(requestId)?.abort();
       const controller = new AbortController();
-      controllers.current.set(request.id, controller);
-      setSending(request.id, true);
+      controllers.current.set(requestId, controller);
+      setSending(requestId, true);
       try {
-        const response = await runtime.execute(request, controller.signal);
-        onResponse(request.id, response);
-        return { kind: 'success' };
+        return { kind: 'success', value: await run(controller.signal) };
       } catch (error) {
-        if (isAbortError(error)) return { kind: 'cancelled' };
+        if (isAbortError(error) && controller.signal.aborted) return { kind: 'cancelled' };
         return error instanceof AppError
           ? { kind: 'failed', message: error.message, code: error.code }
           : { kind: 'failed', message: 'An unexpected error occurred.' };
       } finally {
         // A newer send for the same tab owns the entry once it has replaced this controller.
-        if (controllers.current.get(request.id) === controller) {
-          controllers.current.delete(request.id);
-          setSending(request.id, false);
+        if (controllers.current.get(requestId) === controller) {
+          controllers.current.delete(requestId);
+          setSending(requestId, false);
         }
       }
     },
-    [runtime, onResponse, setSending],
+    [setSending],
   );
 
   const cancel = useCallback((requestId: string) => {

@@ -1,35 +1,14 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { BrowserHttpRuntime, ElectronHttpRuntime, prepareRequest } from './index';
-import { AppError, type HttpReqBridge, type HttpRequest, type HttpResponse } from '@httpreq/shared';
+import { BrowserHttpRuntime, ElectronHttpRuntime } from './index';
+import { AppError, type HttpReqBridge, type HttpResponse, type PreparedRequest } from '@httpreq/shared';
 
-const request: HttpRequest = {
-  id: '1',
-  name: 'test',
+const request: PreparedRequest = {
   method: 'POST',
-  url: 'https://example.com/users',
-  params: [{ id: 'p', key: 'page', value: '2', enabled: true }],
-  headers: [],
-  body: { type: 'json', content: '{"name":"Ada"}' },
-  auth: { type: 'bearer', token: 'secret' },
+  url: 'https://example.com/users?page=2',
+  headers: { Authorization: 'Bearer secret', 'Content-Type': 'application/json' },
+  body: { kind: 'text', text: '{"name":"Ada"}' },
+  options: { followRedirects: true, verifyTls: true, sendCookies: false, maxResponseBytes: 0 },
 };
-
-describe('prepareRequest', () => {
-  it('combines params, auth and JSON defaults', () => {
-    const result = prepareRequest(request);
-    expect(result.url).toBe('https://example.com/users?page=2');
-    expect(result.headers).toEqual({
-      Authorization: 'Bearer secret',
-      'Content-Type': 'application/json',
-    });
-    expect(result.body).toBe('{"name":"Ada"}');
-  });
-
-  it('rejects invalid JSON', () => {
-    expect(() => prepareRequest({ ...request, body: { type: 'json', content: '{' } })).toThrow(
-      'not valid JSON',
-    );
-  });
-});
 
 describe('BrowserHttpRuntime', () => {
   afterEach(() => vi.unstubAllGlobals());
@@ -44,8 +23,19 @@ describe('BrowserHttpRuntime', () => {
         }),
       ),
     );
-    const response = await new BrowserHttpRuntime().execute({ ...request, method: 'GET' });
+    const response = await new BrowserHttpRuntime().execute(request);
     expect(response).toMatchObject({ status: 200, body: '{"ok":true}', sizeBytes: 11 });
+    expect(fetch).toHaveBeenCalledWith(
+      request.url,
+      expect.objectContaining({ method: 'POST', body: '{"name":"Ada"}', redirect: 'follow' }),
+    );
+  });
+
+  it('maps transport failures to NETWORK_ERROR', async () => {
+    vi.stubGlobal('fetch', vi.fn().mockRejectedValue(new TypeError('Failed to fetch')));
+    await expect(new BrowserHttpRuntime().execute(request)).rejects.toMatchObject({
+      code: 'NETWORK_ERROR',
+    });
   });
 });
 

@@ -3,6 +3,10 @@ import * as monaco from 'monaco-editor/esm/vs/editor/editor.api';
 import EditorWorker from 'monaco-editor/esm/vs/editor/editor.worker?worker';
 import 'monaco-editor/esm/vs/language/json/monaco.contribution';
 import JsonWorker from 'monaco-editor/esm/vs/language/json/json.worker?worker';
+// Tokenizer-only grammars (no language workers) for text bodies and request scripts.
+import 'monaco-editor/esm/vs/basic-languages/javascript/javascript.contribution';
+import 'monaco-editor/esm/vs/basic-languages/xml/xml.contribution';
+import 'monaco-editor/esm/vs/basic-languages/html/html.contribution';
 
 (
   globalThis as typeof globalThis & {

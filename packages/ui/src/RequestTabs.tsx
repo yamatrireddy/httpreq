@@ -70,7 +70,7 @@ export const RequestTabs = memo(function RequestTabs({
   const [drop, setDrop] = useState<{ id: string; side: 'before' | 'after' } | null>(null);
   const draggedId = useRef<string | null>(null);
   const focusAfterRender = useRef(false);
-  const closable = requests.length > 1;
+  const closable = requests.length > 0;
   const rovingId = requests.some((request) => request.id === focusedId) ? focusedId! : activeId;
 
   const tabElement = (id: string) =>

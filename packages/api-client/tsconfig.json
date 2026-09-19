@@ -6,6 +6,15 @@
     "emitDeclarationOnly": true,
     "outDir": "dist-types"
   },
-  "include": ["src"],
-  "references": [{ "path": "../shared" }]
+  "include": [
+    "src"
+  ],
+  "references": [
+    {
+      "path": "../shared"
+    },
+    {
+      "path": "../workspace"
+    }
+  ]
 }

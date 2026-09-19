@@ -11,6 +11,8 @@ export interface WorkspacePreferences {
   /** Request pane share of the workspace (0–1), remembered separately for each layout. */
   splitRatio: Record<ResponsePosition, number>;
   sidebarVisible: boolean;
+  /** Sidebar width in pixels (activity rail plus explorer). */
+  sidebarWidth: number;
   statusBarVisible: boolean;
 }
 
@@ -18,6 +20,7 @@ interface PreferencesState extends WorkspacePreferences {
   setResponsePosition: (position: ResponsePosition) => void;
   setSplitRatio: (position: ResponsePosition, ratio: number) => void;
   toggleSidebar: () => void;
+  setSidebarWidth: (width: number) => void;
   toggleStatusBar: () => void;
 }
 
@@ -25,11 +28,18 @@ export const PREFERENCES_KEY = 'httpreq.preferences';
 export const DEFAULT_SPLIT_RATIO: Record<ResponsePosition, number> = { right: 0.5, bottom: 0.5 };
 export const MIN_SPLIT_RATIO = 0.1;
 export const MAX_SPLIT_RATIO = 0.9;
+export const DEFAULT_SIDEBAR_WIDTH = 300;
+export const MIN_SIDEBAR_WIDTH = 220;
+export const MAX_SIDEBAR_WIDTH = 560;
+
+export const clampSidebarWidth = (width: number) =>
+  Math.round(Math.min(MAX_SIDEBAR_WIDTH, Math.max(MIN_SIDEBAR_WIDTH, width)));
 
 export const defaultPreferences = (): WorkspacePreferences => ({
   responsePosition: 'right',
   splitRatio: { ...DEFAULT_SPLIT_RATIO },
   sidebarVisible: true,
+  sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   statusBarVisible: true,
 });
 
@@ -63,6 +73,9 @@ export const parsePreferences = (raw: string | null): WorkspacePreferences => {
     },
     sidebarVisible:
       typeof stored.sidebarVisible === 'boolean' ? stored.sidebarVisible : defaults.sidebarVisible,
+    sidebarWidth: isRatio(stored.sidebarWidth)
+      ? clampSidebarWidth(stored.sidebarWidth)
+      : defaults.sidebarWidth,
     statusBarVisible:
       typeof stored.statusBarVisible === 'boolean'
         ? stored.statusBarVisible
@@ -92,6 +105,7 @@ export const usePreferences = create<PreferencesState>((set) => ({
   setSplitRatio: (position, ratio) =>
     set((state) => ({ splitRatio: { ...state.splitRatio, [position]: clampRatio(ratio) } })),
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
+  setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
   toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
 }));
 
@@ -99,6 +113,7 @@ const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
   responsePosition: state.responsePosition,
   splitRatio: state.splitRatio,
   sidebarVisible: state.sidebarVisible,
+  sidebarWidth: state.sidebarWidth,
   statusBarVisible: state.statusBarVisible,
 });
 
@@ -120,6 +135,7 @@ usePreferences.subscribe((state, previous) => {
     state.responsePosition !== previous.responsePosition ||
     state.splitRatio !== previous.splitRatio ||
     state.sidebarVisible !== previous.sidebarVisible ||
+    state.sidebarWidth !== previous.sidebarWidth ||
     state.statusBarVisible !== previous.statusBarVisible
   ) {
     persist(state);

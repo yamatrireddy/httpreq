@@ -26,6 +26,7 @@ import { executeHttp } from './http';
 import { buildMacMenu } from './menu';
 import {
   isAllowedExternalUrl,
+  isAuthorizationUrl,
   isTitleBarTheme,
   isTrustedRendererUrl,
   nextZoomLevel,
@@ -59,6 +60,9 @@ const contentSecurityPolicy = [
   "connect-src 'self' http: https: ws: wss:",
 ].join('; ');
 
+/** Matches the renderer's body colour, so the window can be shown before the page paints. */
+const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#242424' : '#ffffff');
+
 const titleBarColors = () =>
   nativeTheme.shouldUseDarkColors
     ? { color: '#141414', symbolColor: '#c9c9c9' }
@@ -78,6 +82,23 @@ const windowState = (window: BrowserWindow): DesktopWindowState => ({
   fullscreen: window.isFullScreen(),
 });
 
+/**
+ * API requests run in their own sessions rather than the app's default session: they keep a
+ * separate cookie jar, and the app's CSP header injection never touches API responses. Requests
+ * that opt out of TLS verification use a second session whose certificate check accepts
+ * everything, so the relaxed check can never leak into verified requests.
+ */
+let verifiedSession: Electron.Session | undefined;
+let unverifiedSession: Electron.Session | undefined;
+const apiSession = (verifyTls: boolean): Electron.Session => {
+  if (verifyTls) return (verifiedSession ??= session.fromPartition('persist:httpreq-api'));
+  if (!unverifiedSession) {
+    unverifiedSession = session.fromPartition('persist:httpreq-api-insecure');
+    unverifiedSession.setCertificateVerifyProc((_request, callback) => callback(0));
+  }
+  return unverifiedSession;
+};
+
 // In-flight native requests, keyed by sender so one window cannot cancel another's requests.
 const inFlight = new Map<string, AbortController>();
 const inFlightKey = (event: { sender: { id: number } }, executionId: string) =>
@@ -93,7 +114,9 @@ ipcMain.handle(
     const controller = new AbortController();
     inFlight.set(key, controller);
     try {
-      return await executeHttp(request, controller.signal, (url, init) => net.fetch(url, init));
+      return await executeHttp(request, controller.signal, (url, init, options) =>
+        apiSession(options.verifyTls).fetch(url, init),
+      );
     } finally {
       if (inFlight.get(key) === controller) inFlight.delete(key);
     }
@@ -168,6 +191,10 @@ ipcMain.on('shell:open-external', (event, url: unknown) => {
   if (isTrustedSender(event) && isAllowedExternalUrl(url)) void shell.openExternal(url);
 });
 
+ipcMain.on('shell:open-authorization-url', (event, url: unknown) => {
+  if (isTrustedSender(event) && isAuthorizationUrl(url)) void shell.openExternal(url);
+});
+
 ipcMain.handle('net:check', async (event): Promise<boolean> => {
   if (!isTrustedSender(event) || !net.isOnline()) return false;
   try {
@@ -191,8 +218,11 @@ const createWindow = async () => {
     minHeight: 600,
     title: 'HttpReq',
     icon: isMac ? undefined : windowIcon,
-    backgroundColor: titleBarColors().color,
-    show: false,
+    backgroundColor: windowBackground(),
+    // Shown immediately rather than on `ready-to-show`: on Windows each Chromium child process
+    // (GPU, renderer) can take over a second to start, and a window that appears at once in the
+    // app's colours feels far faster than one that appears only when the page has painted.
+    show: true,
     // The React title bar hosts the menu; the OS keeps drawing the real window controls.
     titleBarStyle: 'hidden',
     ...(isMac
@@ -214,7 +244,6 @@ const createWindow = async () => {
   window.on('enter-full-screen', notifyState);
   window.on('leave-full-screen', notifyState);
 
-  window.once('ready-to-show', () => window.show());
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   // The renderer is a single-page app; never let it navigate away from the bundled UI.
   window.webContents.on('will-navigate', (event, url) => {

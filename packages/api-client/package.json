@@ -6,6 +6,7 @@
     ".": "./src/index.ts"
   },
   "dependencies": {
-    "@httpreq/shared": "*"
+    "@httpreq/shared": "*",
+    "@httpreq/workspace": "*"
   }
 }
