@@ -65,6 +65,8 @@ interface WorkbenchState {
   /* Tabs */
   openRequest: (id: string) => void;
   closeRequest: (id: string) => void;
+  /** Closes several tabs in one update, so the active tab settles only once. */
+  closeRequests: (ids: Iterable<string>) => void;
   setActiveRequest: (id: string) => void;
   cycleRequest: (offset: number) => void;
   moveTab: (id: string, toIndex: number) => void;
@@ -128,6 +130,17 @@ const isPristineDraft = (request: HttpRequest) =>
   request.name === 'Untitled Request' &&
   request.body.mode === 'none' &&
   request.headers.length === 0;
+
+/**
+ * The tab that takes over when the active one closes: the nearest still-open tab to its left,
+ * else the nearest to its right, else nothing.
+ */
+const nearestOpen = (open: readonly string[], closing: ReadonlySet<string>, active: string) => {
+  const index = open.indexOf(active);
+  for (let i = index - 1; i >= 0; i -= 1) if (!closing.has(open[i]!)) return open[i]!;
+  for (let i = index + 1; i < open.length; i += 1) if (!closing.has(open[i]!)) return open[i]!;
+  return null;
+};
 
 const without = <T>(record: Record<string, T>, ids: Iterable<string>) => {
   const next = { ...record };
@@ -198,26 +211,29 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       };
     }),
 
-  closeRequest: (id) =>
+  closeRequest: (id) => get().closeRequests([id]),
+
+  closeRequests: (ids) =>
     set((state) => {
       const open = state.workspace.openRequestIds;
-      const index = open.indexOf(id);
-      if (index < 0) return state;
-      const openRequestIds = open.filter((openId) => openId !== id);
-      const saved = state.workspace.requests.find((request) => request.id === id);
-      // A blank scratch request that was never used disappears with its tab.
-      const discard = saved && !state.drafts[id] && isPristineDraft(saved);
+      const closing = new Set([...ids].filter((id) => open.includes(id)));
+      if (!closing.size) return state;
+      const openRequestIds = open.filter((id) => !closing.has(id));
+      // Blank scratch requests that were never used disappear with their tabs.
+      const dropped = new Set(
+        state.workspace.requests
+          .filter((request) => closing.has(request.id) && !state.drafts[request.id] && isPristineDraft(request))
+          .map((request) => request.id),
+      );
+      const active = state.activeRequestId;
       return {
         workspace: touch(state.workspace, {
           openRequestIds,
-          ...(discard ? { requests: state.workspace.requests.filter((request) => request.id !== id) } : {}),
+          ...(dropped.size ? { requests: state.workspace.requests.filter((request) => !dropped.has(request.id)) } : {}),
         }),
-        drafts: without(state.drafts, [id]),
-        saveStatus: without(state.saveStatus, [id]),
-        activeRequestId:
-          state.activeRequestId === id
-            ? (openRequestIds[Math.max(index - 1, 0)] ?? null)
-            : state.activeRequestId,
+        drafts: without(state.drafts, closing),
+        saveStatus: without(state.saveStatus, closing),
+        activeRequestId: active !== null && closing.has(active) ? nearestOpen(open, closing, active) : active,
       };
     }),
 

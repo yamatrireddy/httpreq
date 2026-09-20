@@ -21,9 +21,15 @@ beforeAll(() => {
 });
 
 const setup = (unsaved: string[] = []) => {
-  const handlers = { onActivate: vi.fn(), onClose: vi.fn(), onNew: vi.fn(), onMove: vi.fn() };
+  const handlers = {
+    onActivate: vi.fn(),
+    onClose: vi.fn(),
+    onCloseMany: vi.fn(),
+    onNew: vi.fn(),
+    onMove: vi.fn(),
+  };
   render(
-    <MantineProvider>
+    <MantineProvider env="test">
       <RequestTabs requests={requests} activeId="r1" unsavedIds={new Set(unsaved)} {...handlers} />
     </MantineProvider>,
   );
@@ -75,4 +81,67 @@ describe('RequestTabs', () => {
     const { tabs } = setup(['r0']);
     expect(tabs[0]!).toHaveAccessibleName(/One \(unsaved changes\)/);
   });
+
+  describe('context menu', () => {
+    const openMenuOn = async (tab: HTMLElement) => {
+      fireEvent.contextMenu(tab.parentElement!);
+      return within(await screen.findByLabelText('Tab actions'));
+    };
+
+    it('closes only the clicked tab', async () => {
+      const { tabs, handlers } = setup();
+      const menu = await openMenuOn(tabs[1]!);
+      fireEvent.click(menu.getByRole('menuitem', { name: 'Close Tab' }));
+      expect(handlers.onCloseMany).toHaveBeenCalledWith(['r1']);
+    });
+
+    it('closes the tabs to the right, to the left, and the others in strip order', async () => {
+      const { tabs, handlers } = setup();
+      let menu = await openMenuOn(tabs[1]!);
+      fireEvent.click(menu.getByRole('menuitem', { name: 'Close Tabs to the Right' }));
+      expect(handlers.onCloseMany).toHaveBeenLastCalledWith(['r2']);
+
+      menu = await openMenuOn(tabs[2]!);
+      fireEvent.click(menu.getByRole('menuitem', { name: 'Close Tabs to the Left' }));
+      expect(handlers.onCloseMany).toHaveBeenLastCalledWith(['r0', 'r1']);
+
+      menu = await openMenuOn(tabs[1]!);
+      fireEvent.click(menu.getByRole('menuitem', { name: 'Close Other Tabs' }));
+      expect(handlers.onCloseMany).toHaveBeenLastCalledWith(['r0', 'r2']);
+
+      menu = await openMenuOn(tabs[1]!);
+      fireEvent.click(menu.getByRole('menuitem', { name: 'Close All Tabs' }));
+      expect(handlers.onCloseMany).toHaveBeenLastCalledWith(['r0', 'r1', 'r2']);
+    });
+
+    it('disables the directions that have no tabs, and Close Other Tabs for a lone tab', async () => {
+      const { tabs } = setup();
+      let menu = await openMenuOn(tabs[0]!);
+      expect(menu.getByRole('menuitem', { name: 'Close Tabs to the Left' })).toHaveAttribute(
+        'data-disabled',
+      );
+      expect(menu.getByRole('menuitem', { name: 'Close Tabs to the Right' })).not.toHaveAttribute(
+        'data-disabled',
+      );
+
+      menu = await openMenuOn(tabs[2]!);
+      expect(menu.getByRole('menuitem', { name: 'Close Tabs to the Right' })).toHaveAttribute(
+        'data-disabled',
+      );
+      expect(menu.getByRole('menuitem', { name: 'Close Other Tabs' })).not.toHaveAttribute(
+        'data-disabled',
+      );
+    });
+
+    it('opens from the keyboard on the focused tab', async () => {
+      const { tabs, handlers } = setup();
+      tabs[2]!.focus();
+      fireEvent.keyDown(tabs[2]!, { key: 'F10', shiftKey: true });
+      const menu = await openedMenu();
+      fireEvent.click(menu.getByRole('menuitem', { name: 'Close Tabs to the Left' }));
+      expect(handlers.onCloseMany).toHaveBeenCalledWith(['r0', 'r1']);
+    });
+  });
 });
+
+const openedMenu = async () => within(await screen.findByLabelText('Tab actions'));

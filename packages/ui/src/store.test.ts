@@ -73,6 +73,50 @@ describe('workbench store', () => {
     expect(state().workspace.requests.some((request) => request.id === saved)).toBe(true);
   });
 
+  it('closes several tabs at once and hands the active tab to the nearest survivor', () => {
+    const [first] = openIds();
+    const second = state().createRequest(null);
+    const third = state().createRequest(null);
+    const fourth = state().createRequest(null);
+    state().editRequest(second, { url: 'https://second.example' });
+    state().setActiveRequest(third);
+
+    // An inactive tab closing leaves the active one alone.
+    state().closeRequests([fourth]);
+    expect(openIds()).toEqual([first, second, third]);
+    expect(state().activeRequestId).toBe(third);
+
+    // Closing the active tab and its left neighbour falls back past both, and drops the draft.
+    state().closeRequests([second, third]);
+    expect(openIds()).toEqual([first]);
+    expect(state().activeRequestId).toBe(first);
+    expect(state().drafts[second]).toBeUndefined();
+  });
+
+  it('falls back to the right when the active tab and everything left of it close', () => {
+    const [first] = openIds();
+    const second = state().createRequest(null);
+    const third = state().createRequest(null);
+    state().setActiveRequest(second);
+    state().closeRequests([first!, second]);
+    expect(openIds()).toEqual([third]);
+    expect(state().activeRequestId).toBe(third);
+  });
+
+  it('closing every tab empties the workspace', () => {
+    state().createRequest(null);
+    state().closeRequests(openIds());
+    expect(openIds()).toEqual([]);
+    expect(state().activeRequestId).toBeNull();
+  });
+
+  it('ignores ids that are not open and de-duplicates the rest', () => {
+    const [first] = openIds();
+    const second = state().createRequest(null);
+    state().closeRequests([second, second, 'missing']);
+    expect(openIds()).toEqual([first]);
+  });
+
   it('deleting a collection closes its tabs and drafts', () => {
     const collectionId = state().workspace.collections[0]!.id;
     const [id] = openIds();

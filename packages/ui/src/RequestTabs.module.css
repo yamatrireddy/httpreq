@@ -214,3 +214,12 @@
     background: Highlight;
   }
 }
+
+/* Zero-size anchor the tab context menu is positioned against, at the pointer. */
+.menuAnchor {
+  /* Block, so the zero width and height apply and the box sits exactly on the pointer. */
+  display: block;
+  position: fixed;
+  width: 0;
+  height: 0;
+}
