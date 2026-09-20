@@ -1,0 +1,322 @@
+import {
+  Alert,
+  Button,
+  Group,
+  Modal,
+  NumberInput,
+  PasswordInput,
+  Select,
+  Stack,
+  Text,
+  TextInput,
+  Textarea,
+} from '@mantine/core';
+import { IconAlertTriangle, IconFolderOpen, IconPlugConnected } from '@tabler/icons-react';
+import { useEffect, useState } from 'react';
+import {
+  hasErrors,
+  validateSshProfile,
+  type SshAuthType,
+  type SshErrorInfo,
+  type SshProfile,
+} from '@httpreq/shared';
+import { VariableInput } from '../editor/VariableInput';
+import { useWorkbenchStore } from '../store';
+import { useSsh } from './useSsh';
+
+const AUTH_OPTIONS: { value: SshAuthType; label: string }[] = [
+  { value: 'password', label: 'Password' },
+  { value: 'key', label: 'Private key' },
+  { value: 'key-passphrase', label: 'Private key + passphrase' },
+];
+
+const secretLabel = (authType: SshAuthType) =>
+  authType === 'password' ? 'Password' : 'Key passphrase';
+
+interface Props {
+  profileId: string | null;
+  onClose: () => void;
+}
+
+/**
+ * Create or edit an SSH connection profile.
+ *
+ * The secret field is write-only: an existing password or passphrase lives in the OS vault and is
+ * never read back, so the field starts empty and shows whether one is already stored. Leaving it
+ * empty keeps what is stored; typing replaces it; the "Remove" action clears it.
+ */
+export function SshProfileDialog({ profileId, onClose }: Props) {
+  const ssh = useSsh();
+  const saved = useWorkbenchStore((state) =>
+    state.workspace.sshProfiles.find((profile) => profile.id === profileId),
+  );
+  const update = useWorkbenchStore((state) => state.updateSshProfile);
+
+  const [draft, setDraft] = useState<SshProfile | null>(null);
+  const [secret, setSecret] = useState('');
+  const [hasStoredSecret, setHasStoredSecret] = useState(false);
+  const [showErrors, setShowErrors] = useState(false);
+  const [testing, setTesting] = useState(false);
+  const [testError, setTestError] = useState<SshErrorInfo | null>(null);
+
+  useEffect(() => {
+    setDraft(saved ? { ...saved } : null);
+    setSecret('');
+    setShowErrors(false);
+    setTestError(null);
+    if (saved) void ssh.hasCredential(saved.credentialId).then(setHasStoredSecret);
+    else setHasStoredSecret(false);
+  }, [saved, ssh]);
+
+  if (!draft) return null;
+
+  const errors = validateSshProfile(draft);
+  const field = (name: string) => (showErrors ? errors[name] : undefined);
+  const patch = (changes: Partial<SshProfile>) => setDraft({ ...draft, ...changes });
+
+  /** Persists the profile and, when one was typed, the secret. Returns whether it succeeded. */
+  const commit = async (): Promise<boolean> => {
+    if (hasErrors(errors)) {
+      setShowErrors(true);
+      return false;
+    }
+    update(draft.id, {
+      name: draft.name.trim(),
+      host: draft.host.trim(),
+      port: draft.port,
+      username: draft.username.trim(),
+      authType: draft.authType,
+      privateKeyPath: draft.privateKeyPath,
+      keepAliveSeconds: draft.keepAliveSeconds,
+      connectTimeoutMs: draft.connectTimeoutMs,
+      description: draft.description,
+    });
+    if (secret) {
+      const stored = await ssh.setCredential(draft.credentialId, secret);
+      if (!stored) {
+        setTestError({
+          code: 'SSH_UNKNOWN',
+          message:
+            'The credential could not be stored securely. This system has no available keychain, and HttpReq will not fall back to storing it in plain text.',
+        });
+        return false;
+      }
+      setSecret('');
+      setHasStoredSecret(true);
+    }
+    return true;
+  };
+
+  const onSave = async () => {
+    if (await commit()) onClose();
+  };
+
+  const onTest = async () => {
+    setTestError(null);
+    if (!(await commit())) return;
+    setTesting(true);
+    // Tested against what was just saved, so the result reflects the stored credential.
+    setTestError(await ssh.test({ ...draft }));
+    setTesting(false);
+  };
+
+  const onRemoveSecret = async () => {
+    await ssh.deleteCredential(draft.credentialId);
+    setHasStoredSecret(false);
+    setSecret('');
+  };
+
+  const needsKey = draft.authType !== 'password';
+
+  return (
+    <Modal opened onClose={onClose} title="SSH connection" size="lg" centered>
+      <Stack gap="sm">
+        <TextInput
+          label="Profile name"
+          placeholder="Production bastion"
+          required
+          value={draft.name}
+          error={field('name')}
+          onChange={(event) => patch({ name: event.currentTarget.value })}
+        />
+
+        <Group grow align="flex-start">
+          <Stack gap={2}>
+            <Text size="sm" fw={500}>
+              Host
+            </Text>
+            <VariableInput
+              value={draft.host}
+              onChange={(host) => patch({ host })}
+              completion
+              mono
+              placeholder="server.example.com or {{SSH_HOST}}"
+              aria-label="Host"
+              invalid={!!field('host')}
+            />
+            {field('host') && (
+              <Text size="xs" c="red">
+                {field('host')}
+              </Text>
+            )}
+          </Stack>
+          <NumberInput
+            label="Port"
+            min={1}
+            max={65535}
+            value={draft.port}
+            error={field('port')}
+            onChange={(value) => patch({ port: typeof value === 'number' ? value : 22 })}
+          />
+        </Group>
+
+        <Stack gap={2}>
+          <Text size="sm" fw={500}>
+            Username
+          </Text>
+          <VariableInput
+            value={draft.username}
+            onChange={(username) => patch({ username })}
+            completion
+            mono
+            placeholder="ubuntu or {{SSH_USERNAME}}"
+            aria-label="Username"
+            invalid={!!field('username')}
+          />
+          {field('username') && (
+            <Text size="xs" c="red">
+              {field('username')}
+            </Text>
+          )}
+        </Stack>
+
+        <Select
+          label="Authentication"
+          data={AUTH_OPTIONS}
+          value={draft.authType}
+          allowDeselect={false}
+          onChange={(value) => patch({ authType: (value as SshAuthType) ?? 'password' })}
+        />
+
+        {needsKey && (
+          <Group align="flex-end" gap="xs">
+            <TextInput
+              style={{ flex: 1 }}
+              label="Private key"
+              description="The key stays where it is; HttpReq stores only its path."
+              placeholder="/home/you/.ssh/id_ed25519"
+              readOnly={ssh.available}
+              value={draft.privateKeyPath}
+              error={field('privateKeyPath')}
+              onChange={(event) => patch({ privateKeyPath: event.currentTarget.value })}
+            />
+            <Button
+              variant="default"
+              leftSection={<IconFolderOpen size={15} />}
+              onClick={() =>
+                void ssh.pickPrivateKey().then((path) => {
+                  if (path) patch({ privateKeyPath: path });
+                })
+              }
+            >
+              Choose…
+            </Button>
+          </Group>
+        )}
+
+        {draft.authType !== 'key' && (
+          <Stack gap={4}>
+            <PasswordInput
+              label={secretLabel(draft.authType)}
+              description={
+                hasStoredSecret
+                  ? 'A value is stored in this system’s credential vault. Leave empty to keep it.'
+                  : 'Stored in this system’s credential vault, never in workspace data.'
+              }
+              placeholder={
+                hasStoredSecret
+                  ? '••••••••'
+                  : `Enter the ${secretLabel(draft.authType).toLowerCase()}`
+              }
+              value={secret}
+              onChange={(event) => setSecret(event.currentTarget.value)}
+            />
+            {hasStoredSecret && (
+              <Group justify="flex-start">
+                <Button
+                  variant="subtle"
+                  color="red"
+                  size="compact-xs"
+                  onClick={() => void onRemoveSecret()}
+                >
+                  Remove the stored {secretLabel(draft.authType).toLowerCase()}
+                </Button>
+              </Group>
+            )}
+          </Stack>
+        )}
+
+        <Group grow>
+          <NumberInput
+            label="Connect timeout (ms)"
+            min={0}
+            step={1000}
+            value={draft.connectTimeoutMs}
+            error={field('connectTimeoutMs')}
+            onChange={(value) =>
+              patch({ connectTimeoutMs: typeof value === 'number' ? value : 20_000 })
+            }
+          />
+          <NumberInput
+            label="Keep-alive (seconds)"
+            description="0 disables keep-alive probes."
+            min={0}
+            value={draft.keepAliveSeconds}
+            onChange={(value) => patch({ keepAliveSeconds: typeof value === 'number' ? value : 0 })}
+          />
+        </Group>
+
+        <Textarea
+          label="Notes"
+          autosize
+          minRows={2}
+          value={draft.description}
+          onChange={(event) => patch({ description: event.currentTarget.value })}
+        />
+
+        {testError && (
+          <Alert
+            color="red"
+            variant="light"
+            icon={<IconAlertTriangle size={16} />}
+            title={testError.message}
+          >
+            {testError.detail && (
+              <Text size="xs" style={{ whiteSpace: 'pre-wrap', wordBreak: 'break-word' }}>
+                {testError.detail}
+              </Text>
+            )}
+          </Alert>
+        )}
+
+        <Group justify="space-between" mt="xs">
+          <Button
+            variant="default"
+            leftSection={<IconPlugConnected size={15} />}
+            loading={testing}
+            disabled={!ssh.available}
+            onClick={() => void onTest()}
+          >
+            Test connection
+          </Button>
+          <Group gap="xs">
+            <Button variant="subtle" color="gray" onClick={onClose}>
+              Cancel
+            </Button>
+            <Button onClick={() => void onSave()}>Save</Button>
+          </Group>
+        </Group>
+      </Stack>
+    </Modal>
+  );
+}

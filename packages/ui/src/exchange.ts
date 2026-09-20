@@ -24,7 +24,11 @@ const subset = (workspace: Workspace, patch: Partial<Workspace>): Workspace => (
 
 export const exportRequest = (workspace: Workspace, request: HttpRequest) => {
   const clean = sanitizeWorkspace(subset(workspace, { requests: [request] })).requests[0]!;
-  return { format: FORMAT_REQUEST, version: WORKSPACE_VERSION, request: { ...clean, parentId: null } };
+  return {
+    format: FORMAT_REQUEST,
+    version: WORKSPACE_VERSION,
+    request: { ...clean, parentId: null },
+  };
 };
 
 export const exportCollection = (workspace: Workspace, collectionId: string) => {
@@ -70,7 +74,11 @@ const reassignIds = (imported: Workspace): Workspace => {
   return {
     ...imported,
     collections: imported.collections.map((item) => ({ ...item, id: map(item.id) })),
-    folders: imported.folders.map((item) => ({ ...item, id: map(item.id), parentId: map(item.parentId) })),
+    folders: imported.folders.map((item) => ({
+      ...item,
+      id: map(item.id),
+      parentId: map(item.parentId),
+    })),
     requests: imported.requests.map((item) => ({
       ...item,
       id: map(item.id),
@@ -105,9 +113,19 @@ export const importFile = (workspace: Workspace, text: string): ImportResult => 
   };
   let raw: Record<string, unknown>;
   if (data?.format === FORMAT_COLLECTION) {
-    raw = { ...base, collections: [data.collection], folders: data.folders, requests: data.requests };
+    raw = {
+      ...base,
+      collections: [data.collection],
+      folders: data.folders,
+      requests: data.requests,
+    };
   } else if (data?.format === FORMAT_REQUEST) {
-    raw = { ...base, collections: [], folders: [], requests: [{ ...(data.request as object), parentId: null }] };
+    raw = {
+      ...base,
+      collections: [],
+      folders: [],
+      requests: [{ ...(data.request as object), parentId: null }],
+    };
   } else {
     throw new Error('This is not an HttpReq request or collection export.');
   }

@@ -1,5 +1,12 @@
 import { describe, expect, it } from 'vitest';
-import { createCollection, createEmptyRequest, createFolder, createKeyValue, type Workspace } from '@httpreq/shared';
+import {
+  createCollection,
+  createEmptyRequest,
+  createFolder,
+  createKeyValue,
+  WORKSPACE_VERSION,
+  type Workspace,
+} from '@httpreq/shared';
 import {
   createDefaultWorkspace,
   deleteNode,
@@ -59,7 +66,11 @@ describe('query sync', () => {
 describe('tree operations', () => {
   it('lists ancestors from the collection down', () => {
     const { workspace, request } = sample();
-    expect(getAncestors(workspace, request.id).map((item) => item.node.name)).toEqual(['API', 'v1', 'auth']);
+    expect(getAncestors(workspace, request.id).map((item) => item.node.name)).toEqual([
+      'API',
+      'v1',
+      'auth',
+    ]);
   });
 
   it('renames by id and ignores blank names', () => {
@@ -73,7 +84,9 @@ describe('tree operations', () => {
     const { workspace, v1, auth } = sample();
     expect(moveNode(workspace, v1.id, auth.id)).toBe(workspace);
     const moved = moveNode(workspace, auth.id, workspace.collections[0]!.id);
-    expect(moved.folders.find((folder) => folder.id === auth.id)!.parentId).toBe(workspace.collections[0]!.id);
+    expect(moved.folders.find((folder) => folder.id === auth.id)!.parentId).toBe(
+      workspace.collections[0]!.id,
+    );
   });
 
   it('duplicates a folder subtree with fresh ids', () => {
@@ -115,7 +128,7 @@ describe('migrateWorkspace', () => {
         },
       ],
     })!;
-    expect(migrated.version).toBe(2);
+    expect(migrated.version).toBe(WORKSPACE_VERSION);
     expect(migrated.openRequestIds).toEqual(['r1']);
     expect(migrated.requests[0]).toMatchObject({
       parentId: null,

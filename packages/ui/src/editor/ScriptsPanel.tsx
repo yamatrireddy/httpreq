@@ -16,7 +16,11 @@ const STAGES: { value: keyof RequestScripts; label: string; hint: string }[] = [
     label: 'Post-response',
     hint: 'Runs after the response arrives, e.g. to store a token from the body.',
   },
-  { value: 'tests', label: 'Tests', hint: 'Assertions about the response, e.g. its status or JSON shape.' },
+  {
+    value: 'tests',
+    label: 'Tests',
+    hint: 'Assertions about the response, e.g. its status or JSON shape.',
+  },
 ];
 
 interface Props {

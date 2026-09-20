@@ -18,7 +18,12 @@ const UPCOMING = ['Workspace sharing', 'Team synchronization', 'Shareable links'
  * Sharing is export-based and entirely local: HttpReq has no backend. Nothing here changes how
  * requests are stored.
  */
-export function SharingPanel({ buildCurl, onExportRequest, onExportCollection, collectionName }: Props) {
+export function SharingPanel({
+  buildCurl,
+  onExportRequest,
+  onExportCollection,
+  collectionName,
+}: Props) {
   const [curl, setCurl] = useState<string | null>(null);
   const [building, setBuilding] = useState(false);
 
@@ -30,7 +35,11 @@ export function SharingPanel({ buildCurl, onExportRequest, onExportCollection, c
       await navigator.clipboard.writeText(command);
       notifications.show({ color: 'teal', message: 'cURL command copied to the clipboard.' });
     } catch (error) {
-      notifications.show({ color: 'red', title: 'Cannot build cURL', message: (error as Error).message });
+      notifications.show({
+        color: 'red',
+        title: 'Cannot build cURL',
+        message: (error as Error).message,
+      });
     } finally {
       setBuilding(false);
     }
@@ -43,7 +52,8 @@ export function SharingPanel({ buildCurl, onExportRequest, onExportCollection, c
           Copy as cURL
         </Title>
         <Text size="xs" c="dimmed">
-          Uses the active environment. Secret variables stay as <Code>{'{{name}}'}</Code> references.
+          Uses the active environment. Secret variables stay as <Code>{'{{name}}'}</Code>{' '}
+          references.
         </Text>
         <Group>
           <Button
@@ -71,7 +81,12 @@ export function SharingPanel({ buildCurl, onExportRequest, onExportCollection, c
           Saves a JSON file you can share or keep in version control. Literal secrets are removed.
         </Text>
         <Group gap="xs">
-          <Button size="xs" variant="default" leftSection={<IconDownload size={14} />} onClick={onExportRequest}>
+          <Button
+            size="xs"
+            variant="default"
+            leftSection={<IconDownload size={14} />}
+            onClick={onExportRequest}
+          >
             Export request
           </Button>
           {onExportCollection && (

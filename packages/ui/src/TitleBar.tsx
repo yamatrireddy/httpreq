@@ -6,7 +6,7 @@ import {
   IconSettings,
   IconSun,
 } from '@tabler/icons-react';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, type ReactNode } from 'react';
 import type { DesktopBridge, DesktopWindowState } from '@httpreq/shared';
 import { AppLogo } from './AppLogo';
 import type { CommandMap } from './commands';
@@ -15,6 +15,8 @@ import classes from './TitleBar.module.css';
 
 interface Props {
   title: string;
+  /** Rendered between the menu bar and the window title, e.g. the workspace switcher. */
+  leading?: ReactNode;
   menus: MenuDefinition[];
   commands: CommandMap;
   mac: boolean;
@@ -40,6 +42,7 @@ const toHex = (color: string) => {
  */
 export function TitleBar({
   title,
+  leading,
   menus,
   commands,
   mac,
@@ -96,6 +99,7 @@ export function TitleBar({
         {(mac || !desktop) && <span className={classes.appName}>HttpReq</span>}
       </div>
       {!mac && <MenuBar menus={menus} commands={commands} mac={mac} altKeyNavigation={!!desktop} />}
+      {leading}
       <div className={classes.title} title={title}>
         {title}
       </div>

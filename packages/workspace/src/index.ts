@@ -4,7 +4,16 @@ import {
   createEmptyRequest,
   createEnvironment,
   createId,
+  createSshProfile,
+  createTunnelProfile,
+  createWebSocketRequest,
   DEFAULT_REQUEST_SETTINGS,
+  DEFAULT_SSH_PORT,
+  DEFAULT_WEBSOCKET_SETTINGS,
+  isSshAuthType,
+  isTunnelType,
+  LOOPBACK_BIND_ADDRESS,
+  WEBSOCKET_PAYLOAD_TYPES,
   isHttpMethod,
   TEXT_CONTENT_TYPES,
   BODY_MODES,
@@ -20,12 +29,18 @@ import {
   type MultipartField,
   type RequestBody,
   type RequestSettings,
+  type SshProfile,
+  type TunnelProfile,
+  type WebSocketPayloadType,
+  type WebSocketRequest,
+  type WebSocketSettings,
   type Workspace,
 } from '@httpreq/shared';
 import { urlWithParams } from './query';
 
 export * from './query';
 export * from './tree';
+export * from './workspaces';
 
 export const DEFAULT_WORKSPACE_ID = 'default';
 
@@ -40,7 +55,13 @@ export const createDefaultWorkspace = (): Workspace => {
   const environment: Environment = {
     ...createEnvironment('Development'),
     variables: [
-      { id: createId(), key: 'base_url', value: 'https://httpbin.org', enabled: true, secret: false },
+      {
+        id: createId(),
+        key: 'base_url',
+        value: 'https://httpbin.org',
+        enabled: true,
+        secret: false,
+      },
     ],
   };
   return {
@@ -50,12 +71,32 @@ export const createDefaultWorkspace = (): Workspace => {
     collections: [collection],
     folders: [],
     requests: [request],
+    websocketRequests: [],
     environments: [environment],
     activeEnvironmentId: environment.id,
+    sshProfiles: [],
+    tunnelProfiles: [],
     openRequestIds: [request.id],
     updatedAt: new Date().toISOString(),
   };
 };
+
+/** An empty workspace, as created from the workspace switcher. */
+export const createWorkspace = (name = 'New Workspace', workspaceId = createId()): Workspace => ({
+  version: WORKSPACE_VERSION,
+  id: workspaceId,
+  name: name.trim() || 'New Workspace',
+  collections: [],
+  folders: [],
+  requests: [],
+  websocketRequests: [],
+  environments: [],
+  activeEnvironmentId: null,
+  sshProfiles: [],
+  tunnelProfiles: [],
+  openRequestIds: [],
+  updatedAt: new Date().toISOString(),
+});
 
 /* ---------- Normalization of untrusted stored or imported data ---------- */
 
@@ -111,13 +152,11 @@ const normalizeBody = (value: unknown): RequestBody => {
     text: str(value.text),
     textContentType,
     formUrlEncoded: list(value.formUrlEncoded).map(normalizeKeyValue),
-    multipart: list(value.multipart).map(
-      (field): MultipartField => ({
-        ...normalizeKeyValue(field),
-        kind: field.kind === 'file' ? 'file' : 'text',
-        file: normalizeFile(field.file),
-      }),
-    ),
+    multipart: list(value.multipart).map((field): MultipartField => ({
+      ...normalizeKeyValue(field),
+      kind: field.kind === 'file' ? 'file' : 'text',
+      file: normalizeFile(field.file),
+    })),
     binary: normalizeFile(value.binary),
   };
 };
@@ -156,6 +195,88 @@ export const normalizeRequest = (
       postResponse: str(scripts.postResponse),
       tests: str(scripts.tests),
     },
+    description: str(value.description),
+  };
+};
+
+const normalizeWebSocketSettings = (value: unknown): WebSocketSettings => {
+  const settings = isObject(value) ? value : {};
+  const defaults = DEFAULT_WEBSOCKET_SETTINGS;
+  return {
+    handshakeTimeoutMs: num(settings.handshakeTimeoutMs, defaults.handshakeTimeoutMs),
+    verifyTls: bool(settings.verifyTls, defaults.verifyTls),
+    autoReconnect: bool(settings.autoReconnect, defaults.autoReconnect),
+    reconnectDelayMs: num(settings.reconnectDelayMs, defaults.reconnectDelayMs),
+    messageLimit: Math.max(1, num(settings.messageLimit, defaults.messageLimit)),
+  };
+};
+
+export const normalizeWebSocketRequest = (
+  value: Json,
+  parentId: string | null,
+  normalizeAuth: AuthNormalizer = basicAuthNormalizer,
+): WebSocketRequest => {
+  const payloadType = str(value.draftPayloadType);
+  return {
+    id: id(value.id),
+    name: str(value.name).trim() || 'Untitled Socket',
+    parentId,
+    url: str(value.url),
+    params: list(value.params).map(normalizeKeyValue),
+    headers: list(value.headers).map(normalizeKeyValue),
+    subprotocols: Array.isArray(value.subprotocols)
+      ? value.subprotocols.filter((item): item is string => typeof item === 'string' && !!item)
+      : [],
+    auth: normalizeAuth(value.auth) ?? (parentId ? { type: 'inherit' } : { type: 'none' }),
+    settings: normalizeWebSocketSettings(value.settings),
+    draftPayloadType: (WEBSOCKET_PAYLOAD_TYPES as readonly string[]).includes(payloadType)
+      ? (payloadType as WebSocketPayloadType)
+      : 'text',
+    draftMessage: str(value.draftMessage),
+    description: str(value.description),
+  };
+};
+
+/**
+ * Desktop connection profiles. A stored profile can never contain a password or passphrase, so
+ * normalization only has to repair shapes; anything secret-looking is simply not a field here.
+ */
+export const normalizeSshProfile = (value: Json): SshProfile => {
+  const fallback = createSshProfile();
+  const port = num(value.port, DEFAULT_SSH_PORT);
+  return {
+    id: id(value.id),
+    name: str(value.name).trim() || 'Connection',
+    host: str(value.host).trim(),
+    port: Number.isInteger(port) && port >= 1 && port <= 65_535 ? port : DEFAULT_SSH_PORT,
+    username: str(value.username).trim(),
+    authType: isSshAuthType(value.authType) ? value.authType : 'password',
+    privateKeyPath: str(value.privateKeyPath),
+    // A profile that lost its vault key gets a fresh one; the old secret becomes unreachable.
+    credentialId: str(value.credentialId) || fallback.credentialId,
+    keepAliveSeconds: num(value.keepAliveSeconds, fallback.keepAliveSeconds),
+    connectTimeoutMs: num(value.connectTimeoutMs, fallback.connectTimeoutMs),
+    description: str(value.description),
+  };
+};
+
+export const normalizeTunnelProfile = (value: Json): TunnelProfile => {
+  const fallback = createTunnelProfile();
+  const port = (raw: unknown) => {
+    const parsed = num(raw, 0);
+    return Number.isInteger(parsed) && parsed >= 0 && parsed <= 65_535 ? parsed : 0;
+  };
+  return {
+    id: id(value.id),
+    name: str(value.name).trim() || 'Tunnel',
+    sshProfileId: str(value.sshProfileId),
+    type: isTunnelType(value.type) ? value.type : 'local',
+    // Anything unparseable falls back to loopback rather than to a public interface.
+    localBindAddress: str(value.localBindAddress).trim() || LOOPBACK_BIND_ADDRESS,
+    localPort: port(value.localPort),
+    remoteHost: str(value.remoteHost).trim(),
+    remotePort: port(value.remotePort),
+    autoStart: bool(value.autoStart, fallback.autoStart),
     description: str(value.description),
   };
 };
@@ -211,13 +332,29 @@ export const migrateWorkspace = (
   const liveContainers = new Set([...collections, ...folders].map((item) => item.id));
 
   const version1 = value.version !== WORKSPACE_VERSION;
+  const containerOf = (item: Json) =>
+    typeof item.parentId === 'string' && liveContainers.has(item.parentId) ? item.parentId : null;
   const requests = list(value.requests).map((item) => {
-    const parentId = typeof item.parentId === 'string' && liveContainers.has(item.parentId) ? item.parentId : null;
-    const request = normalizeRequest(item, parentId, normalizeAuth);
+    const request = normalizeRequest(item, containerOf(item), normalizeAuth);
     // Version 1 appended enabled params at send time; they now live in the URL.
     return version1 ? { ...request, url: urlWithParams(request.url, request.params) } : request;
   });
-  const requestIds = new Set(requests.map((item) => item.id));
+  // Versions 1 and 2 had no WebSocket requests, so the list is simply absent there.
+  const websocketRequests = list(value.websocketRequests).map((item) =>
+    normalizeWebSocketRequest(item, containerOf(item), normalizeAuth),
+  );
+  const sshProfiles = list(value.sshProfiles).map(normalizeSshProfile);
+  const knownSshProfiles = new Set(sshProfiles.map((profile) => profile.id));
+  // A tunnel whose SSH profile is gone cannot start, but it is kept so the user can repoint it.
+  const tunnelProfiles = list(value.tunnelProfiles)
+    .map(normalizeTunnelProfile)
+    .map((tunnel) =>
+      knownSshProfiles.has(tunnel.sshProfileId) ? tunnel : { ...tunnel, sshProfileId: '' },
+    );
+  const requestIds = new Set([
+    ...requests.map((item) => item.id),
+    ...websocketRequests.map((item) => item.id),
+  ]);
 
   const environments: Environment[] = list(value.environments).map((item) => ({
     id: id(item.id),
@@ -240,8 +377,11 @@ export const migrateWorkspace = (
     collections,
     folders,
     requests,
+    websocketRequests,
     environments,
     activeEnvironmentId,
+    sshProfiles,
+    tunnelProfiles,
     openRequestIds: [...new Set(open)],
     updatedAt: str(value.updatedAt, new Date().toISOString()),
   };
@@ -254,5 +394,11 @@ export const validateWorkspace = (value: unknown): value is Workspace =>
   Array.isArray(value.collections) &&
   Array.isArray(value.folders) &&
   Array.isArray(value.requests) &&
+  Array.isArray(value.websocketRequests) &&
   Array.isArray(value.environments) &&
+  Array.isArray(value.sshProfiles) &&
+  Array.isArray(value.tunnelProfiles) &&
   Array.isArray(value.openRequestIds);
+
+// Re-exported so callers reach every factory through @httpreq/workspace alone.
+export { createSshProfile, createTunnelProfile, createWebSocketRequest };

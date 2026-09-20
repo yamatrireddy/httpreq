@@ -4,20 +4,26 @@ import {
   type Folder,
   type HttpRequest,
   type TreeNodeKind,
+  type WebSocketRequest,
   type Workspace,
 } from '@httpreq/shared';
 
 /**
- * Pure operations on the collection tree. Collections, folders and requests are stored in flat
- * arrays linked by `parentId`; array order is sibling order. Every function returns a new
- * workspace and leaves unrelated entities untouched (same object identity).
+ * Pure operations on the collection tree. Collections, folders, HTTP requests and WebSocket
+ * requests are stored in flat arrays linked by `parentId`; array order is sibling order. Every
+ * function returns a new workspace and leaves unrelated entities untouched (same object identity).
+ *
+ * HTTP and WebSocket requests keep separate arrays, so within one container the explorer shows
+ * HTTP requests first and sockets after them. Each array is independently orderable.
  */
 
 export type ContainerNode =
-  | { kind: 'collection'; node: Collection }
-  | { kind: 'folder'; node: Folder };
+  { kind: 'collection'; node: Collection } | { kind: 'folder'; node: Folder };
 
-export type TreeNode = ContainerNode | { kind: 'request'; node: HttpRequest };
+export type LeafNode =
+  { kind: 'request'; node: HttpRequest } | { kind: 'websocket'; node: WebSocketRequest };
+
+export type TreeNode = ContainerNode | LeafNode;
 
 export const findNode = (workspace: Workspace, id: string): TreeNode | undefined => {
   const collection = workspace.collections.find((item) => item.id === id);
@@ -25,8 +31,14 @@ export const findNode = (workspace: Workspace, id: string): TreeNode | undefined
   const folder = workspace.folders.find((item) => item.id === id);
   if (folder) return { kind: 'folder', node: folder };
   const request = workspace.requests.find((item) => item.id === id);
-  return request ? { kind: 'request', node: request } : undefined;
+  if (request) return { kind: 'request', node: request };
+  const socket = workspace.websocketRequests.find((item) => item.id === id);
+  return socket ? { kind: 'websocket', node: socket } : undefined;
 };
+
+/** The node kinds that open in the tab strip. */
+export const isLeafNode = (node: TreeNode): node is LeafNode =>
+  node.kind === 'request' || node.kind === 'websocket';
 
 const parentIdOf = (node: TreeNode): string | null =>
   node.kind === 'collection' ? null : node.node.parentId;
@@ -40,7 +52,7 @@ export const getAncestors = (workspace: Workspace, id: string): ContainerNode[] 
   while (parentId && !seen.has(parentId)) {
     seen.add(parentId);
     const parent = findNode(workspace, parentId);
-    if (!parent || parent.kind === 'request') break;
+    if (!parent || isLeafNode(parent)) break;
     path.unshift(parent);
     parentId = parentIdOf(parent);
   }
@@ -56,6 +68,9 @@ export const childFolders = (workspace: Workspace, parentId: string) =>
 export const childRequests = (workspace: Workspace, parentId: string | null) =>
   workspace.requests.filter((request) => request.parentId === parentId);
 
+export const childWebSockets = (workspace: Workspace, parentId: string | null) =>
+  workspace.websocketRequests.filter((request) => request.parentId === parentId);
+
 /** Ids of `id` and everything beneath it, grouped by kind. */
 export const collectSubtree = (workspace: Workspace, id: string) => {
   const containers = new Set<string>([id]);
@@ -70,10 +85,19 @@ export const collectSubtree = (workspace: Workspace, id: string) => {
       }
     }
   }
-  const requests = workspace.requests
-    .filter((request) => request.id === id || (request.parentId && containers.has(request.parentId)))
-    .map((request) => request.id);
-  return { containers, requests: new Set(requests) };
+  const inSubtree = (item: { id: string; parentId: string | null }) =>
+    item.id === id || (item.parentId !== null && containers.has(item.parentId));
+  return {
+    containers,
+    requests: new Set(workspace.requests.filter(inSubtree).map((item) => item.id)),
+    websockets: new Set(workspace.websocketRequests.filter(inSubtree).map((item) => item.id)),
+  };
+};
+
+/** Ids of every tab-bearing node in the subtree, whatever its kind. */
+export const collectSubtreeLeaves = (workspace: Workspace, id: string): Set<string> => {
+  const { requests, websockets } = collectSubtree(workspace, id);
+  return new Set([...requests, ...websockets]);
 };
 
 const touch = (workspace: Workspace, patch: Partial<Workspace>): Workspace => ({
@@ -88,9 +112,16 @@ export const renameNode = (workspace: Workspace, id: string, name: string): Work
   if (!node || !trimmed || node.node.name === trimmed) return workspace;
   const rename = <T extends { id: string; name: string }>(items: T[]) =>
     items.map((item) => (item.id === id ? { ...item, name: trimmed } : item));
-  if (node.kind === 'collection') return touch(workspace, { collections: rename(workspace.collections) });
-  if (node.kind === 'folder') return touch(workspace, { folders: rename(workspace.folders) });
-  return touch(workspace, { requests: rename(workspace.requests) });
+  switch (node.kind) {
+    case 'collection':
+      return touch(workspace, { collections: rename(workspace.collections) });
+    case 'folder':
+      return touch(workspace, { folders: rename(workspace.folders) });
+    case 'request':
+      return touch(workspace, { requests: rename(workspace.requests) });
+    case 'websocket':
+      return touch(workspace, { websocketRequests: rename(workspace.websocketRequests) });
+  }
 };
 
 /** Moves `item` within `items` so that it sits before `beforeId` (or last). */
@@ -118,11 +149,16 @@ export const moveNode = (
     return touch(workspace, { collections: reorder(workspace.collections, node.node, beforeId) });
   }
   const target = parentId ? findNode(workspace, parentId) : undefined;
-  if (parentId && (!target || target.kind === 'request')) return workspace;
+  if (parentId && (!target || isLeafNode(target))) return workspace;
   if (node.kind === 'folder') {
     if (!parentId || parentId === id || isAncestorOf(workspace, id, parentId)) return workspace;
     return touch(workspace, {
       folders: reorder(workspace.folders, { ...node.node, parentId }, beforeId),
+    });
+  }
+  if (node.kind === 'websocket') {
+    return touch(workspace, {
+      websocketRequests: reorder(workspace.websocketRequests, { ...node.node, parentId }, beforeId),
     });
   }
   return touch(workspace, {
@@ -132,10 +168,11 @@ export const moveNode = (
 
 const copyName = (name: string) => `${name} (copy)`;
 
+const rekey = <T extends { id: string }>(items: T[]) =>
+  items.map((item) => ({ ...item, id: createId() }));
+
 const cloneRequest = (request: HttpRequest, parentId: string | null): HttpRequest => {
   const copy = structuredClone(request);
-  const rekey = <T extends { id: string }>(items: T[]) =>
-    items.map((item) => ({ ...item, id: createId() }));
   return {
     ...copy,
     id: createId(),
@@ -147,6 +184,17 @@ const cloneRequest = (request: HttpRequest, parentId: string | null): HttpReques
       formUrlEncoded: rekey(copy.body.formUrlEncoded),
       multipart: rekey(copy.body.multipart),
     },
+  };
+};
+
+const cloneWebSocket = (request: WebSocketRequest, parentId: string | null): WebSocketRequest => {
+  const copy = structuredClone(request);
+  return {
+    ...copy,
+    id: createId(),
+    parentId,
+    params: rekey(copy.params),
+    headers: rekey(copy.headers),
   };
 };
 
@@ -163,19 +211,35 @@ export const duplicateNode = (
     requests.splice(requests.indexOf(node.node) + 1, 0, copy);
     return { workspace: touch(workspace, { requests }), id: copy.id };
   }
+  if (node.kind === 'websocket') {
+    const copy = {
+      ...cloneWebSocket(node.node, node.node.parentId),
+      name: copyName(node.node.name),
+    };
+    const websocketRequests = [...workspace.websocketRequests];
+    websocketRequests.splice(websocketRequests.indexOf(node.node) + 1, 0, copy);
+    return { workspace: touch(workspace, { websocketRequests }), id: copy.id };
+  }
 
   const idMap = new Map<string, string>();
   const newId = (old: string) => {
     if (!idMap.has(old)) idMap.set(old, createId());
     return idMap.get(old)!;
   };
-  const { containers, requests: requestIds } = collectSubtree(workspace, id);
+  const { containers, requests: requestIds, websockets: socketIds } = collectSubtree(workspace, id);
   const folders = workspace.folders
     .filter((folder) => containers.has(folder.id) && folder.id !== id)
-    .map((folder) => ({ ...structuredClone(folder), id: newId(folder.id), parentId: newId(folder.parentId) }));
+    .map((folder) => ({
+      ...structuredClone(folder),
+      id: newId(folder.id),
+      parentId: newId(folder.parentId),
+    }));
   const requests = workspace.requests
     .filter((request) => requestIds.has(request.id))
     .map((request) => cloneRequest(request, newId(request.parentId!)));
+  const sockets = workspace.websocketRequests
+    .filter((request) => socketIds.has(request.id))
+    .map((request) => cloneWebSocket(request, newId(request.parentId!)));
 
   if (node.kind === 'collection') {
     const root = { ...structuredClone(node.node), id: newId(id), name: copyName(node.node.name) };
@@ -186,6 +250,7 @@ export const duplicateNode = (
         collections,
         folders: [...workspace.folders, ...folders],
         requests: [...workspace.requests, ...requests],
+        websocketRequests: [...workspace.websocketRequests, ...sockets],
       }),
       id: root.id,
     };
@@ -197,27 +262,30 @@ export const duplicateNode = (
     workspace: touch(workspace, {
       folders: allFolders,
       requests: [...workspace.requests, ...requests],
+      websocketRequests: [...workspace.websocketRequests, ...sockets],
     }),
     id: root.id,
   };
 };
 
-/** Deletes a node and its subtree. Returns the removed request ids so tabs and drafts can close. */
+/** Deletes a node and its subtree. Returns the removed leaf ids so tabs and drafts can close. */
 export const deleteNode = (
   workspace: Workspace,
   id: string,
 ): { workspace: Workspace; removedRequestIds: Set<string> } => {
   const node = findNode(workspace, id);
   if (!node) return { workspace, removedRequestIds: new Set() };
-  const { containers, requests } = collectSubtree(workspace, id);
+  const { containers, requests, websockets } = collectSubtree(workspace, id);
+  const removedRequestIds = new Set([...requests, ...websockets]);
   return {
     workspace: touch(workspace, {
       collections: workspace.collections.filter((item) => !containers.has(item.id)),
       folders: workspace.folders.filter((item) => !containers.has(item.id)),
       requests: workspace.requests.filter((item) => !requests.has(item.id)),
-      openRequestIds: workspace.openRequestIds.filter((openId) => !requests.has(openId)),
+      websocketRequests: workspace.websocketRequests.filter((item) => !websockets.has(item.id)),
+      openRequestIds: workspace.openRequestIds.filter((openId) => !removedRequestIds.has(openId)),
     }),
-    removedRequestIds: requests,
+    removedRequestIds,
   };
 };
 

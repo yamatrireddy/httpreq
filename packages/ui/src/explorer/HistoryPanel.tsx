@@ -13,11 +13,20 @@ const dayLabel = (date: Date) => {
   return date.toLocaleDateString(undefined, { weekday: 'short', month: 'short', day: 'numeric' });
 };
 
-export function HistoryPanel({ onClear, onOpened }: { onClear: () => void; onOpened?: () => void }) {
+export function HistoryPanel({
+  onClear,
+  onOpened,
+}: {
+  onClear: () => void;
+  onOpened?: () => void;
+}) {
   const history = useWorkbenchStore((state) => state.history);
   const requests = useWorkbenchStore((state) => state.workspace.requests);
   const openRequest = useWorkbenchStore((state) => state.openRequest);
-  const names = useMemo(() => new Map(requests.map((request) => [request.id, request.name])), [requests]);
+  const names = useMemo(
+    () => new Map(requests.map((request) => [request.id, request.name])),
+    [requests],
+  );
 
   let lastDay = '';
   return (
@@ -58,13 +67,24 @@ export function HistoryPanel({ onClear, onOpened }: { onClear: () => void; onOpe
                 }}
                 title={current ? `${entry.method} ${entry.url}` : 'This request was deleted'}
               >
-                <span className={classes.method} style={{ color: `var(--mantine-color-${methodColor[entry.method]}-text)` }}>
-                  {entry.method === 'DELETE' ? 'DEL' : entry.method === 'OPTIONS' ? 'OPT' : entry.method}
+                <span
+                  className={classes.method}
+                  style={{ color: `var(--mantine-color-${methodColor[entry.method]}-text)` }}
+                >
+                  {entry.method === 'DELETE'
+                    ? 'DEL'
+                    : entry.method === 'OPTIONS'
+                      ? 'OPT'
+                      : entry.method}
                 </span>
                 <span className={classes.rowName} data-deleted={!current || undefined}>
                   {current ?? entry.name}
                 </span>
-                <Text span size="xs" c={entry.status === null ? 'red' : entry.status < 400 ? 'teal' : 'red'}>
+                <Text
+                  span
+                  size="xs"
+                  c={entry.status === null ? 'red' : entry.status < 400 ? 'teal' : 'red'}
+                >
                   {entry.status ?? 'ERR'}
                 </Text>
                 <Text span size="xs" c="dimmed">

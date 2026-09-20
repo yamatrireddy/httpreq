@@ -5,12 +5,20 @@ import {
   createEnvironment,
   createFolder,
   createId,
+  createSshProfile as newSshProfile,
+  createTunnelProfile as newTunnelProfile,
+  createWebSocketRequest as newSocketRequest,
   type AuthConfig,
   type Environment,
   type HistoryEntry,
   type HttpRequest,
   type HttpResponse,
+  type RequestKind,
+  type SshProfile,
+  type TunnelProfile,
+  type WebSocketRequest,
   type Workspace,
+  type WorkspaceMeta,
 } from '@httpreq/shared';
 import {
   createDefaultWorkspace,
@@ -18,6 +26,7 @@ import {
   duplicateNode as duplicateTreeNode,
   findNode,
   getAncestors,
+  isLeafNode,
   moveNode as moveTreeNode,
   renameNode as renameTreeNode,
 } from '@httpreq/workspace';
@@ -34,7 +43,11 @@ export const EDITOR_TABS = [
 ] as const;
 export type EditorTab = (typeof EDITOR_TABS)[number];
 
-export type SidebarView = 'collections' | 'environments' | 'history';
+export const SIDEBAR_VIEWS = ['collections', 'environments', 'history', 'ssh', 'tunnels'] as const;
+export type SidebarView = (typeof SIDEBAR_VIEWS)[number];
+
+/** Sidebar views that only exist in the desktop app. */
+export const DESKTOP_SIDEBAR_VIEWS: readonly SidebarView[] = ['ssh', 'tunnels'];
 
 /** Only in-flight and failed saves are tracked; "saved" and "modified" derive from drafts. */
 export type SaveStatus = 'saving' | 'failed';
@@ -42,6 +55,10 @@ export type SaveStatus = 'saving' | 'failed';
 interface WorkbenchState {
   /** Durable data: exactly what was last committed (and is being persisted). */
   workspace: Workspace;
+  /** Every workspace that exists, for the switcher. Kept in step by the persistence layer. */
+  workspaces: WorkspaceMeta[];
+  /** Set while a workspace is being loaded, so the UI can block edits to the outgoing one. */
+  switching: boolean;
   /**
    * Unsaved edits, keyed by request id. The editor always shows `drafts[id] ?? saved`; a draft
    * is dropped as soon as it matches the saved request again. Name and parent are structural
@@ -60,8 +77,21 @@ interface WorkbenchState {
   revealNonce: number;
   sidebarView: SidebarView;
   editorTabs: Record<string, EditorTab | undefined>;
+  /**
+   * SSH terminal tabs, in tab order. They are deliberately not persisted: a shell cannot survive
+   * a restart, so reopening the app to a row of dead terminals would be a lie.
+   */
+  openSshSessionIds: string[];
+  activeSshSessionId: string | null;
 
-  load: (workspace: Workspace, drafts: Record<string, HttpRequest>, history: HistoryEntry[]) => void;
+  load: (
+    workspace: Workspace,
+    drafts: Record<string, HttpRequest>,
+    history: HistoryEntry[],
+  ) => void;
+  setWorkspaces: (workspaces: WorkspaceMeta[]) => void;
+  setSwitching: (switching: boolean) => void;
+  renameWorkspace: (name: string) => void;
   /* Tabs */
   openRequest: (id: string) => void;
   closeRequest: (id: string) => void;
@@ -74,7 +104,12 @@ interface WorkbenchState {
   editRequest: (id: string, patch: Partial<HttpRequest>) => void;
   discardDraft: (id: string) => void;
   /** Applies a successful save of `committed` (the draft snapshot that was written). */
-  commitSaved: (committed: HttpRequest, draft: HttpRequest, written: Workspace, base: Workspace) => void;
+  commitSaved: (
+    committed: HttpRequest,
+    draft: HttpRequest,
+    written: Workspace,
+    base: Workspace,
+  ) => void;
   setSaveStatus: (id: string, status: SaveStatus | undefined) => void;
   setResponse: (id: string, response: HttpResponse) => void;
   setEditorTab: (id: string, tab: EditorTab) => void;
@@ -82,6 +117,9 @@ interface WorkbenchState {
   createCollection: () => string;
   createFolder: (parentId: string) => string;
   createRequest: (parentId: string | null) => string;
+  createWebSocketRequest: (parentId: string | null) => string;
+  /** WebSocket requests have no draft cycle: an edit is committed to the workspace at once. */
+  editWebSocketRequest: (id: string, patch: Partial<WebSocketRequest>) => void;
   renameNode: (id: string, name: string) => void;
   moveNode: (id: string, parentId: string | null, beforeId?: string | null) => void;
   duplicateNode: (id: string) => void;
@@ -103,7 +141,34 @@ interface WorkbenchState {
   /** Creates or updates a variable in the active environment (e.g. a retrieved OAuth token). */
   setEnvironmentVariable: (key: string, value: string, secret: boolean) => boolean;
   setHistory: (history: HistoryEntry[]) => void;
+  /* SSH terminal tabs (desktop only) */
+  openSshSession: (sessionId: string) => void;
+  closeSshSession: (sessionId: string) => void;
+  setActiveSshSession: (sessionId: string | null) => void;
+  moveSshTab: (sessionId: string, toIndex: number) => void;
+  /* Desktop connection profiles */
+  createSshProfile: () => string;
+  updateSshProfile: (id: string, patch: Partial<Omit<SshProfile, 'id' | 'credentialId'>>) => void;
+  duplicateSshProfile: (id: string) => string | null;
+  deleteSshProfile: (id: string) => void;
+  createTunnelProfile: (sshProfileId?: string) => string;
+  updateTunnelProfile: (id: string, patch: Partial<Omit<TunnelProfile, 'id'>>) => void;
+  duplicateTunnelProfile: (id: string) => string | null;
+  deleteTunnelProfile: (id: string) => void;
 }
+
+/** Whether a tab id belongs to an HTTP or a WebSocket request. */
+export const requestKind = (workspace: Workspace, id: string): RequestKind | undefined => {
+  const node = findNode(workspace, id);
+  return node && isLeafNode(node) ? node.kind : undefined;
+};
+
+export const findWebSocketRequest = (workspace: Workspace, id: string | null) =>
+  id ? workspace.websocketRequests.find((request) => request.id === id) : undefined;
+
+/** Tunnel profiles that would stop working if this SSH profile were deleted. */
+export const tunnelsUsingSshProfile = (workspace: Workspace, sshProfileId: string) =>
+  workspace.tunnelProfiles.filter((tunnel) => tunnel.sshProfileId === sshProfileId);
 
 const touch = (workspace: Workspace, patch: Partial<Workspace>): Workspace => ({
   ...workspace,
@@ -118,11 +183,21 @@ export const editableRequest = (
   state: Pick<WorkbenchState, 'workspace' | 'drafts'>,
   id: string | null,
 ): HttpRequest | undefined =>
-  id ? (state.drafts[id] ?? state.workspace.requests.find((request) => request.id === id)) : undefined;
+  id
+    ? (state.drafts[id] ?? state.workspace.requests.find((request) => request.id === id))
+    : undefined;
 
 export const activeEnvironment = (workspace: Workspace) =>
   workspace.environments.find((environment) => environment.id === workspace.activeEnvironmentId) ??
   null;
+
+/** A never-used blank socket, which disappears with its tab instead of cluttering the tree. */
+const isPristineSocket = (request: WebSocketRequest) =>
+  request.parentId === null &&
+  !request.url &&
+  request.name === 'Untitled Socket' &&
+  !request.draftMessage &&
+  request.headers.length === 0;
 
 const isPristineDraft = (request: HttpRequest) =>
   request.parentId === null &&
@@ -158,6 +233,8 @@ const initial = createDefaultWorkspace();
 
 export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   workspace: initial,
+  workspaces: [],
+  switching: false,
   drafts: {},
   activeRequestId: initial.openRequestIds[0] ?? null,
   responses: {},
@@ -169,6 +246,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   revealNonce: 0,
   sidebarView: 'collections',
   editorTabs: {},
+  openSshSessionIds: [],
+  activeSshSessionId: null,
 
   load: (workspace, drafts, history) => {
     const requestIds = new Set(workspace.requests.map((request) => request.id));
@@ -185,9 +264,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       workspace,
       drafts: liveDrafts,
       history,
+      switching: false,
       activeRequestId: active,
       responses: {},
       saveStatus: {},
+      // Terminals belong to the workspace that opened them and do not survive a switch.
+      openSshSessionIds: [],
+      activeSshSessionId: null,
       selectedNodeId: active,
       expandedIds: new Set([
         ...workspace.collections.map((collection) => collection.id),
@@ -196,9 +279,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     });
   },
 
+  setWorkspaces: (workspaces) => set({ workspaces }),
+
+  setSwitching: (switching) => set({ switching }),
+
+  renameWorkspace: (name) =>
+    set((state) => {
+      const trimmed = name.trim();
+      if (!trimmed || trimmed === state.workspace.name) return state;
+      return { workspace: touch(state.workspace, { name: trimmed }) };
+    }),
+
   openRequest: (id) =>
     set((state) => {
-      if (!state.workspace.requests.some((request) => request.id === id)) return state;
+      if (!requestKind(state.workspace, id)) return state;
       const open = state.workspace.openRequestIds;
       if (open.includes(id)) return { activeRequestId: id, selectedNodeId: id };
       const index = state.activeRequestId ? open.indexOf(state.activeRequestId) : -1;
@@ -222,18 +316,36 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       // Blank scratch requests that were never used disappear with their tabs.
       const dropped = new Set(
         state.workspace.requests
-          .filter((request) => closing.has(request.id) && !state.drafts[request.id] && isPristineDraft(request))
+          .filter(
+            (request) =>
+              closing.has(request.id) && !state.drafts[request.id] && isPristineDraft(request),
+          )
+          .map((request) => request.id),
+      );
+      const droppedSockets = new Set(
+        state.workspace.websocketRequests
+          .filter((request) => closing.has(request.id) && isPristineSocket(request))
           .map((request) => request.id),
       );
       const active = state.activeRequestId;
       return {
         workspace: touch(state.workspace, {
           openRequestIds,
-          ...(dropped.size ? { requests: state.workspace.requests.filter((request) => !dropped.has(request.id)) } : {}),
+          ...(dropped.size
+            ? { requests: state.workspace.requests.filter((request) => !dropped.has(request.id)) }
+            : {}),
+          ...(droppedSockets.size
+            ? {
+                websocketRequests: state.workspace.websocketRequests.filter(
+                  (request) => !droppedSockets.has(request.id),
+                ),
+              }
+            : {}),
         }),
         drafts: without(state.drafts, closing),
         saveStatus: without(state.saveStatus, closing),
-        activeRequestId: active !== null && closing.has(active) ? nearestOpen(open, closing, active) : active,
+        activeRequestId:
+          active !== null && closing.has(active) ? nearestOpen(open, closing, active) : active,
       };
     }),
 
@@ -265,13 +377,20 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       if (!saved) return state;
       const base = state.drafts[id] ?? saved;
       // Structural fields are changed through tree actions only.
-      const next: HttpRequest = { ...base, ...patch, id, name: saved.name, parentId: saved.parentId };
+      const next: HttpRequest = {
+        ...base,
+        ...patch,
+        id,
+        name: saved.name,
+        parentId: saved.parentId,
+      };
       if (same(next, saved)) {
         return state.drafts[id] ? { drafts: without(state.drafts, [id]) } : state;
       }
       return {
         drafts: { ...state.drafts, [id]: next },
-        saveStatus: state.saveStatus[id] === 'failed' ? without(state.saveStatus, [id]) : state.saveStatus,
+        saveStatus:
+          state.saveStatus[id] === 'failed' ? without(state.saveStatus, [id]) : state.saveStatus,
       };
     }),
 
@@ -289,7 +408,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           ? written
           : touch(state.workspace, {
               requests: state.workspace.requests.map((request) =>
-                request.id === committed.id ? { ...committed, name: request.name, parentId: request.parentId } : request,
+                request.id === committed.id
+                  ? { ...committed, name: request.name, parentId: request.parentId }
+                  : request,
               ),
             });
       const current = state.drafts[committed.id];
@@ -305,14 +426,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       saveStatus: status ? { ...state.saveStatus, [id]: status } : without(state.saveStatus, [id]),
     })),
 
-  setResponse: (id, response) => set((state) => ({ responses: { ...state.responses, [id]: response } })),
+  setResponse: (id, response) =>
+    set((state) => ({ responses: { ...state.responses, [id]: response } })),
 
   setEditorTab: (id, tab) => set((state) => ({ editorTabs: { ...state.editorTabs, [id]: tab } })),
 
   createCollection: () => {
     const collection = createCollection();
     set((state) => ({
-      workspace: touch(state.workspace, { collections: [...state.workspace.collections, collection] }),
+      workspace: touch(state.workspace, {
+        collections: [...state.workspace.collections, collection],
+      }),
       selectedNodeId: collection.id,
       renamingId: collection.id,
       sidebarView: 'collections',
@@ -342,6 +466,40 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     return request.id;
   },
 
+  createWebSocketRequest: (parentId) => {
+    const request = newSocketRequest(parentId);
+    set((state) => ({
+      workspace: touch(state.workspace, {
+        websocketRequests: [...state.workspace.websocketRequests, request],
+      }),
+      expandedIds: parentId ? withExpanded(state.expandedIds, [parentId]) : state.expandedIds,
+      renamingId: parentId ? request.id : null,
+    }));
+    get().openRequest(request.id);
+    return request.id;
+  },
+
+  editWebSocketRequest: (id, patch) =>
+    set((state) => {
+      const saved = state.workspace.websocketRequests.find((request) => request.id === id);
+      if (!saved) return state;
+      // Name and parent are structural and are changed through the tree actions only.
+      const next: WebSocketRequest = {
+        ...saved,
+        ...patch,
+        id,
+        name: saved.name,
+        parentId: saved.parentId,
+      };
+      return {
+        workspace: touch(state.workspace, {
+          websocketRequests: state.workspace.websocketRequests.map((request) =>
+            request.id === id ? next : request,
+          ),
+        }),
+      };
+    }),
+
   renameNode: (id, name) =>
     set((state) => {
       const workspace = renameTreeNode(state.workspace, id, name);
@@ -370,7 +528,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     const { workspace, id: copyId } = duplicateTreeNode(get().workspace, id);
     if (!copyId) return;
     set({ workspace, selectedNodeId: copyId });
-    if (findNode(workspace, copyId)?.kind === 'request') get().openRequest(copyId);
+    const node = findNode(workspace, copyId);
+    if (node && isLeafNode(node)) get().openRequest(copyId);
   },
 
   deleteNode: (id) =>
@@ -378,14 +537,19 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       const { workspace, removedRequestIds } = deleteTreeNode(state.workspace, id);
       if (workspace === state.workspace) return state;
       const open = workspace.openRequestIds;
-      const activeGone = state.activeRequestId !== null && removedRequestIds.has(state.activeRequestId);
-      const previousIndex = state.activeRequestId ? state.workspace.openRequestIds.indexOf(state.activeRequestId) : 0;
+      const activeGone =
+        state.activeRequestId !== null && removedRequestIds.has(state.activeRequestId);
+      const previousIndex = state.activeRequestId
+        ? state.workspace.openRequestIds.indexOf(state.activeRequestId)
+        : 0;
       return {
         workspace,
         drafts: without(state.drafts, removedRequestIds),
         responses: without(state.responses, removedRequestIds),
         saveStatus: without(state.saveStatus, removedRequestIds),
-        activeRequestId: activeGone ? (open[Math.min(previousIndex, open.length - 1)] ?? null) : state.activeRequestId,
+        activeRequestId: activeGone
+          ? (open[Math.min(previousIndex, open.length - 1)] ?? null)
+          : state.activeRequestId,
         selectedNodeId: state.selectedNodeId === id ? null : state.selectedNodeId,
       };
     }),
@@ -500,4 +664,148 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   },
 
   setHistory: (history) => set({ history }),
+
+  /* ---------- SSH terminal tabs ---------- */
+
+  openSshSession: (sessionId) =>
+    set((state) =>
+      state.openSshSessionIds.includes(sessionId)
+        ? { activeSshSessionId: sessionId, activeRequestId: null }
+        : {
+            openSshSessionIds: [...state.openSshSessionIds, sessionId],
+            activeSshSessionId: sessionId,
+            activeRequestId: null,
+          },
+    ),
+
+  closeSshSession: (sessionId) =>
+    set((state) => {
+      const index = state.openSshSessionIds.indexOf(sessionId);
+      if (index < 0) return state;
+      const remaining = state.openSshSessionIds.filter((id) => id !== sessionId);
+      const wasActive = state.activeSshSessionId === sessionId;
+      return {
+        openSshSessionIds: remaining,
+        activeSshSessionId: wasActive
+          ? (remaining[Math.min(index, remaining.length - 1)] ?? null)
+          : state.activeSshSessionId,
+        // With no terminal left, focus returns to whichever request tab was open.
+        activeRequestId:
+          wasActive && remaining.length === 0
+            ? (state.workspace.openRequestIds[0] ?? null)
+            : state.activeRequestId,
+      };
+    }),
+
+  setActiveSshSession: (activeSshSessionId) =>
+    set({ activeSshSessionId, ...(activeSshSessionId ? { activeRequestId: null } : {}) }),
+
+  moveSshTab: (sessionId, toIndex) =>
+    set((state) => {
+      const order = [...state.openSshSessionIds];
+      const from = order.indexOf(sessionId);
+      const target = Math.max(0, Math.min(toIndex, order.length - 1));
+      if (from < 0 || from === target) return state;
+      order.splice(from, 1);
+      order.splice(target, 0, sessionId);
+      return { openSshSessionIds: order };
+    }),
+
+  /* ---------- Desktop connection profiles ---------- */
+
+  createSshProfile: () => {
+    const profile = newSshProfile();
+    set((state) => ({
+      workspace: touch(state.workspace, { sshProfiles: [...state.workspace.sshProfiles, profile] }),
+      sidebarView: 'ssh',
+    }));
+    return profile.id;
+  },
+
+  updateSshProfile: (id, patch) =>
+    set((state) => ({
+      workspace: touch(state.workspace, {
+        sshProfiles: state.workspace.sshProfiles.map((profile) =>
+          // `credentialId` is never patched: the vault entry has to follow the profile.
+          profile.id === id
+            ? { ...profile, ...patch, id, credentialId: profile.credentialId }
+            : profile,
+        ),
+      }),
+    })),
+
+  duplicateSshProfile: (id) => {
+    const state = get();
+    const index = state.workspace.sshProfiles.findIndex((profile) => profile.id === id);
+    const source = state.workspace.sshProfiles[index];
+    if (!source) return null;
+    // A fresh credential id, so the copy starts without the original's stored secret.
+    const copy: SshProfile = {
+      ...source,
+      id: createId(),
+      credentialId: createId(),
+      name: `${source.name} (copy)`,
+    };
+    const sshProfiles = [...state.workspace.sshProfiles];
+    sshProfiles.splice(index + 1, 0, copy);
+    set({ workspace: touch(state.workspace, { sshProfiles }) });
+    return copy.id;
+  },
+
+  deleteSshProfile: (id) =>
+    set((state) => ({
+      workspace: touch(state.workspace, {
+        sshProfiles: state.workspace.sshProfiles.filter((profile) => profile.id !== id),
+        // Dependent tunnels are kept but unlinked, so the user can repoint rather than rebuild.
+        tunnelProfiles: state.workspace.tunnelProfiles.map((tunnel) =>
+          tunnel.sshProfileId === id ? { ...tunnel, sshProfileId: '', autoStart: false } : tunnel,
+        ),
+      }),
+    })),
+
+  createTunnelProfile: (sshProfileId) => {
+    const state = get();
+    const profile = newTunnelProfile(sshProfileId ?? state.workspace.sshProfiles[0]?.id ?? '');
+    set({
+      workspace: touch(state.workspace, {
+        tunnelProfiles: [...state.workspace.tunnelProfiles, profile],
+      }),
+      sidebarView: 'tunnels',
+    });
+    return profile.id;
+  },
+
+  updateTunnelProfile: (id, patch) =>
+    set((state) => ({
+      workspace: touch(state.workspace, {
+        tunnelProfiles: state.workspace.tunnelProfiles.map((tunnel) =>
+          tunnel.id === id ? { ...tunnel, ...patch, id } : tunnel,
+        ),
+      }),
+    })),
+
+  duplicateTunnelProfile: (id) => {
+    const state = get();
+    const index = state.workspace.tunnelProfiles.findIndex((tunnel) => tunnel.id === id);
+    const source = state.workspace.tunnelProfiles[index];
+    if (!source) return null;
+    // The local port has to be unique, so the copy starts stopped and not auto-starting.
+    const copy: TunnelProfile = {
+      ...source,
+      id: createId(),
+      name: `${source.name} (copy)`,
+      autoStart: false,
+    };
+    const tunnelProfiles = [...state.workspace.tunnelProfiles];
+    tunnelProfiles.splice(index + 1, 0, copy);
+    set({ workspace: touch(state.workspace, { tunnelProfiles }) });
+    return copy.id;
+  },
+
+  deleteTunnelProfile: (id) =>
+    set((state) => ({
+      workspace: touch(state.workspace, {
+        tunnelProfiles: state.workspace.tunnelProfiles.filter((tunnel) => tunnel.id !== id),
+      }),
+    })),
 }));

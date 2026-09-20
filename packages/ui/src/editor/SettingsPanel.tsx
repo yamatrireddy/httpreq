@@ -9,7 +9,17 @@ interface Props {
   desktop: boolean;
 }
 
-function Row({ label, description, badge, control }: { label: string; description: ReactNode; badge?: ReactNode; control: ReactNode }) {
+function Row({
+  label,
+  description,
+  badge,
+  control,
+}: {
+  label: string;
+  description: ReactNode;
+  badge?: ReactNode;
+  control: ReactNode;
+}) {
   return (
     <div className={classes.settingRow}>
       <div>
@@ -42,7 +52,8 @@ const Soon = () => (
 /** Per-request transport behaviour. Options a platform cannot honour are marked, not faked. */
 export function SettingsPanel({ request, onChange, desktop }: Props) {
   const { settings } = request;
-  const set = (patch: Partial<RequestSettings>) => onChange({ settings: { ...settings, ...patch } });
+  const set = (patch: Partial<RequestSettings>) =>
+    onChange({ settings: { ...settings, ...patch } });
 
   return (
     <Stack gap={0} maw={760}>
@@ -120,13 +131,30 @@ export function SettingsPanel({ request, onChange, desktop }: Props) {
             min={0}
             suffix=" MB"
             value={settings.responseSizeLimitMb}
-            onChange={(value) => set({ responseSizeLimitMb: typeof value === 'number' ? value : 0 })}
+            onChange={(value) =>
+              set({ responseSizeLimitMb: typeof value === 'number' ? value : 0 })
+            }
           />
         }
       />
-      <Row label="Maximum redirects" badge={<Soon />} description="Limit how many redirects are followed." control={null} />
-      <Row label="Automatic Content-Length" badge={<Soon />} description="Currently always computed by the network stack." control={null} />
-      <Row label="Request compression" badge={<Soon />} description="Compress request bodies (gzip, br)." control={null} />
+      <Row
+        label="Maximum redirects"
+        badge={<Soon />}
+        description="Limit how many redirects are followed."
+        control={null}
+      />
+      <Row
+        label="Automatic Content-Length"
+        badge={<Soon />}
+        description="Currently always computed by the network stack."
+        control={null}
+      />
+      <Row
+        label="Request compression"
+        badge={<Soon />}
+        description="Compress request bodies (gzip, br)."
+        control={null}
+      />
     </Stack>
   );
 }

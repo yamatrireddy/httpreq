@@ -1,129 +1,85 @@
-import type {
-  HistoryEntry,
-  HistoryRepository,
-  HttpRequest,
-  KeyValueItem,
-  Workspace,
-  WorkspaceRepository,
-} from '@httpreq/shared';
-import { deserializeAuth, isTemplateOnly, serializeAuth } from '@httpreq/api-client';
-import { migrateWorkspace, normalizeRequest } from '@httpreq/workspace';
+import type { HistoryRepository, WorkspaceRepository } from '@httpreq/shared';
+import { KeyValueHistoryRepository, KeyValueWorkspaceRepository } from './repository';
+import { createBrowserStore, WebStorageStore, type KeyValueStore } from './store';
 
-const PREFIX = 'httpreq.workspace.';
-const DRAFTS_PREFIX = 'httpreq.drafts.';
-const HISTORY_PREFIX = 'httpreq.history.';
-
-/** Maximum number of history entries kept per workspace. */
-export const HISTORY_LIMIT = 200;
-
-/** A literal secret is dropped; a `{{variable}}` reference is kept (the secret lives elsewhere). */
-const withoutSecretValue = <T extends { value: string; secret?: boolean }>(item: T): T =>
-  item.secret && item.value && !isTemplateOnly(item.value) ? { ...item, value: '' } : item;
-
-const sanitizeRequest = (request: HttpRequest): HttpRequest => ({
-  ...request,
-  auth: serializeAuth(request.auth),
-  headers: request.headers.map((item: KeyValueItem) => withoutSecretValue(item)),
-});
+export * from './repository';
+export * from './sanitize';
+export * from './store';
 
 /**
- * Workspace data as it may be written to disk: no passwords, tokens, API-key values, secret
- * headers or secret environment values. A future Electron repository should keep those in the OS
- * credential vault and persist only references.
+ * Key prefix used by the pre-workspace releases, which wrote straight to `localStorage` as
+ * `httpreq.workspace.<id>`, `httpreq.drafts.<id>` and `httpreq.history.<id>`.
  */
-export const sanitizeWorkspace = (workspace: Workspace): Workspace => ({
-  ...workspace,
-  collections: workspace.collections.map((item) => ({ ...item, auth: serializeAuth(item.auth) })),
-  folders: workspace.folders.map((item) => ({ ...item, auth: serializeAuth(item.auth) })),
-  requests: workspace.requests.map(sanitizeRequest),
-  environments: workspace.environments.map((environment) => ({
-    ...environment,
-    variables: environment.variables.map(withoutSecretValue),
-  })),
-});
+export const LEGACY_PREFIX = 'httpreq.';
 
-const read = (storage: Storage, key: string): unknown => {
-  const raw = storage.getItem(key);
-  if (!raw) return null;
+/** Keys the legacy layout owned. Preferences live under their own key and are left alone. */
+const LEGACY_PATTERN = /^(workspace|drafts|history)\./;
+
+/**
+ * Copies pre-workspace `localStorage` data into `target` the first time the app runs on the new
+ * storage. Only keys that the target does not already have are copied, so a partial or repeated
+ * migration can never overwrite newer data, and the legacy keys are left in place as a backup.
+ *
+ * Returns the number of keys copied.
+ */
+export const migrateLegacyStorage = async (
+  target: KeyValueStore,
+  storage: Storage | undefined = globalThis.localStorage,
+): Promise<number> => {
+  if (!storage) return 0;
+  let legacy: WebStorageStore;
+  let keys: string[];
   try {
-    return JSON.parse(raw);
+    legacy = new WebStorageStore(storage, LEGACY_PREFIX);
+    keys = (await legacy.keys()).filter((key) => LEGACY_PATTERN.test(key));
   } catch {
-    return null;
+    return 0;
   }
+  if (!keys.length) return 0;
+  const existing = new Set(await target.keys());
+  let copied = 0;
+  for (const key of keys) {
+    if (existing.has(key)) continue;
+    const value = await legacy.get(key);
+    if (value === null) continue;
+    await target.set(key, value);
+    copied += 1;
+  }
+  return copied;
 };
 
-export class LocalWorkspaceRepository implements WorkspaceRepository {
-  constructor(private readonly storage: Storage = localStorage) {}
+/**
+ * The browser's storage stack: IndexedDB when available, with pre-workspace `localStorage` data
+ * carried over on first run. Falls back to `localStorage` and then to memory, so the app always
+ * starts even when site data is blocked.
+ */
+export const createBrowserStorage = async (): Promise<{
+  store: KeyValueStore;
+  repository: WorkspaceRepository;
+  history: HistoryRepository;
+}> => {
+  const store = await createBrowserStore();
+  // A failed migration must not stop the app: the worst case is an empty first workspace.
+  await migrateLegacyStorage(store).catch(() => 0);
+  return {
+    store,
+    repository: new KeyValueWorkspaceRepository(store),
+    history: new KeyValueHistoryRepository(store),
+  };
+};
 
-  async getWorkspace(id: string): Promise<Workspace | null> {
-    return migrateWorkspace(read(this.storage, `${PREFIX}${id}`), deserializeAuth);
-  }
-
-  async saveWorkspace(workspace: Workspace): Promise<void> {
-    this.storage.setItem(`${PREFIX}${workspace.id}`, JSON.stringify(sanitizeWorkspace(workspace)));
-  }
-
-  async deleteWorkspace(id: string): Promise<void> {
-    this.storage.removeItem(`${PREFIX}${id}`);
-    this.storage.removeItem(`${DRAFTS_PREFIX}${id}`);
-    this.storage.removeItem(`${HISTORY_PREFIX}${id}`);
-  }
-
-  async getDrafts(workspaceId: string): Promise<Record<string, HttpRequest>> {
-    const value = read(this.storage, `${DRAFTS_PREFIX}${workspaceId}`);
-    if (!value || typeof value !== 'object') return {};
-    const drafts: Record<string, HttpRequest> = {};
-    for (const [id, raw] of Object.entries(value as Record<string, unknown>)) {
-      if (!raw || typeof raw !== 'object') continue;
-      const parentId = (raw as { parentId?: unknown }).parentId;
-      drafts[id] = normalizeRequest(
-        { ...(raw as Record<string, unknown>), id },
-        typeof parentId === 'string' ? parentId : null,
-        deserializeAuth,
-      );
-    }
-    return drafts;
-  }
-
-  async saveDrafts(workspaceId: string, drafts: Record<string, HttpRequest>): Promise<void> {
-    const key = `${DRAFTS_PREFIX}${workspaceId}`;
-    if (Object.keys(drafts).length === 0) {
-      this.storage.removeItem(key);
-      return;
-    }
-    const sanitized = Object.fromEntries(
-      Object.entries(drafts).map(([id, draft]) => [id, sanitizeRequest(draft)]),
-    );
-    this.storage.setItem(key, JSON.stringify(sanitized));
+/**
+ * `localStorage`-backed repositories, reading and writing the same keys as before workspaces
+ * existed. Kept for tests and for runtimes without IndexedDB.
+ */
+export class LocalWorkspaceRepository extends KeyValueWorkspaceRepository {
+  constructor(storage: Storage = localStorage) {
+    super(new WebStorageStore(storage, LEGACY_PREFIX));
   }
 }
 
-const isHistoryEntry = (value: unknown): value is HistoryEntry =>
-  !!value &&
-  typeof value === 'object' &&
-  typeof (value as HistoryEntry).id === 'string' &&
-  typeof (value as HistoryEntry).requestId === 'string' &&
-  typeof (value as HistoryEntry).timestamp === 'string';
-
-/** Request history, newest first. Only unresolved URLs are recorded, never resolved secrets. */
-export class LocalHistoryRepository implements HistoryRepository {
-  constructor(
-    private readonly storage: Storage = localStorage,
-    private readonly limit = HISTORY_LIMIT,
-  ) {}
-
-  async list(workspaceId: string): Promise<HistoryEntry[]> {
-    const value = read(this.storage, `${HISTORY_PREFIX}${workspaceId}`);
-    return Array.isArray(value) ? value.filter(isHistoryEntry) : [];
-  }
-
-  async add(workspaceId: string, entry: HistoryEntry): Promise<HistoryEntry[]> {
-    const entries = [entry, ...(await this.list(workspaceId))].slice(0, this.limit);
-    this.storage.setItem(`${HISTORY_PREFIX}${workspaceId}`, JSON.stringify(entries));
-    return entries;
-  }
-
-  async clear(workspaceId: string): Promise<void> {
-    this.storage.removeItem(`${HISTORY_PREFIX}${workspaceId}`);
+export class LocalHistoryRepository extends KeyValueHistoryRepository {
+  constructor(storage: Storage = localStorage, limit?: number) {
+    super(new WebStorageStore(storage, LEGACY_PREFIX), limit);
   }
 }

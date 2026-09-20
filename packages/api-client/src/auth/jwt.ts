@@ -25,33 +25,55 @@ const pemToDer = (pem: string): Uint8Array => {
   }
 };
 
-const importKey = async (config: JwtAuth): Promise<[CryptoKey, AlgorithmIdentifier | RsaPssParams | EcdsaParams]> => {
+const importKey = async (
+  config: JwtAuth,
+): Promise<[CryptoKey, AlgorithmIdentifier | RsaPssParams | EcdsaParams]> => {
   const { algorithm } = config;
   const hash = hashFor(algorithm);
   try {
     if (isHmacAlgorithm(algorithm)) {
       const secret = config.secretBase64 ? base64ToBytes(config.secret) : utf8(config.secret);
-      const key = await crypto.subtle.importKey('raw', secret as BufferSource, { name: 'HMAC', hash }, false, ['sign']);
+      const key = await crypto.subtle.importKey(
+        'raw',
+        secret as BufferSource,
+        { name: 'HMAC', hash },
+        false,
+        ['sign'],
+      );
       return [key, { name: 'HMAC' }];
     }
     const der = pemToDer(config.secret) as BufferSource;
     if (algorithm.startsWith('RS')) {
-      const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSASSA-PKCS1-v1_5', hash }, false, ['sign']);
+      const key = await crypto.subtle.importKey(
+        'pkcs8',
+        der,
+        { name: 'RSASSA-PKCS1-v1_5', hash },
+        false,
+        ['sign'],
+      );
       return [key, { name: 'RSASSA-PKCS1-v1_5' }];
     }
     if (algorithm.startsWith('PS')) {
-      const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSA-PSS', hash }, false, ['sign']);
+      const key = await crypto.subtle.importKey('pkcs8', der, { name: 'RSA-PSS', hash }, false, [
+        'sign',
+      ]);
       return [key, { name: 'RSA-PSS', saltLength: Number(algorithm.slice(2)) / 8 }];
     }
     const namedCurve = algorithm === 'ES256' ? 'P-256' : 'P-384';
-    const key = await crypto.subtle.importKey('pkcs8', der, { name: 'ECDSA', namedCurve }, false, ['sign']);
+    const key = await crypto.subtle.importKey('pkcs8', der, { name: 'ECDSA', namedCurve }, false, [
+      'sign',
+    ]);
     // Web Crypto emits ECDSA signatures as r||s, which is exactly the JWS encoding.
     return [key, { name: 'ECDSA', hash }];
   } catch (cause) {
     if (cause instanceof AppError) throw cause;
-    throw new AppError('AUTHENTICATION_ERROR', `The ${algorithm} signing key could not be imported.`, {
-      cause,
-    });
+    throw new AppError(
+      'AUTHENTICATION_ERROR',
+      `The ${algorithm} signing key could not be imported.`,
+      {
+        cause,
+      },
+    );
   }
 };
 
@@ -73,7 +95,10 @@ const parseObject = (text: string, label: string): Record<string, unknown> => {
 export const signJwt = async (config: JwtAuth, nowMs: number): Promise<string> => {
   const header = { ...parseObject(config.header, 'header'), alg: config.algorithm, typ: 'JWT' };
   const issuedAt = Math.floor(nowMs / 1000);
-  const claims: Record<string, unknown> = { iat: issuedAt, ...parseObject(config.payload, 'payload') };
+  const claims: Record<string, unknown> = {
+    iat: issuedAt,
+    ...parseObject(config.payload, 'payload'),
+  };
   if (config.issuer) claims.iss = config.issuer;
   if (config.subject) claims.sub = config.subject;
   if (config.audience) claims.aud = config.audience;
@@ -82,7 +107,9 @@ export const signJwt = async (config: JwtAuth, nowMs: number): Promise<string> =
   const encode = (value: unknown) => base64Url(utf8(JSON.stringify(value)));
   const signingInput = `${encode(header)}.${encode(claims)}`;
   const [key, params] = await importKey(config);
-  const signature = new Uint8Array(await crypto.subtle.sign(params, key, utf8(signingInput) as BufferSource));
+  const signature = new Uint8Array(
+    await crypto.subtle.sign(params, key, utf8(signingInput) as BufferSource),
+  );
   return `${signingInput}.${base64Url(signature)}`;
 };
 
@@ -126,7 +153,9 @@ export const jwtAuthProvider = defineProvider<JwtAuth>({
       : [
           {
             field: 'secret',
-            message: isHmacAlgorithm(config.algorithm) ? 'Enter a signing secret.' : 'Paste a private key.',
+            message: isHmacAlgorithm(config.algorithm)
+              ? 'Enter a signing secret.'
+              : 'Paste a private key.',
             severity: 'warning' as const,
           },
         ]),

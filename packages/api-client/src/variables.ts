@@ -47,7 +47,10 @@ export const DYNAMIC_VARIABLES: Record<string, { description: string; generate: 
     description: 'Current Unix time in seconds',
     generate: () => String(Math.floor(Date.now() / 1000)),
   },
-  $isoTimestamp: { description: 'Current time in ISO 8601', generate: () => new Date().toISOString() },
+  $isoTimestamp: {
+    description: 'Current time in ISO 8601',
+    generate: () => new Date().toISOString(),
+  },
   $randomInt: {
     description: 'A random integer from 0 to 1000',
     generate: () => String(Math.floor(Math.random() * 1001)),

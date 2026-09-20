@@ -67,7 +67,8 @@ export const executeHttp = async (
   fetchImpl: FetchImplementation,
 ): Promise<IpcResult<HttpResponse>> => {
   try {
-    if (!isPreparedRequest(request)) throw new AppError('INVALID_REQUEST', 'Invalid request payload.');
+    if (!isPreparedRequest(request))
+      throw new AppError('INVALID_REQUEST', 'Invalid request payload.');
     let url: URL;
     try {
       url = new URL(request.url);

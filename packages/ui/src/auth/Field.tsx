@@ -12,7 +12,12 @@ interface Props extends Omit<VariableInputProps, 'id'> {
 export function Field({ label, description, error, ...input }: Props) {
   const id = useId();
   return (
-    <Input.Wrapper label={label} description={description} error={error} labelProps={{ htmlFor: id }}>
+    <Input.Wrapper
+      label={label}
+      description={description}
+      error={error}
+      labelProps={{ htmlFor: id }}
+    >
       <VariableInput id={id} invalid={!!error} {...input} />
     </Input.Wrapper>
   );

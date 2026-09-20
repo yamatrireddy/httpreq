@@ -29,7 +29,8 @@ export const isTokenExpired = (config: Pick<OAuth2Auth, 'expiresAt'>, now = Date
 export const oauth2AuthProvider = defineProvider<OAuth2Auth>({
   type: 'oauth2',
   label: 'OAuth 2.0',
-  description: 'Obtains an access token from an authorization server and sends it as a bearer token.',
+  description:
+    'Obtains an access token from an authorization server and sends it as a bearer token.',
   secretFields: ['clientSecret', 'password', 'accessToken', 'refreshToken'],
   enums: {
     grantType: OAUTH2_GRANT_TYPES,
@@ -62,7 +63,11 @@ export const oauth2AuthProvider = defineProvider<OAuth2Auth>({
         severity: 'warning',
       });
     } else if (isTokenExpired(config)) {
-      issues.push({ field: 'accessToken', message: 'The access token has expired.', severity: 'warning' });
+      issues.push({
+        field: 'accessToken',
+        message: 'The access token has expired.',
+        severity: 'warning',
+      });
     }
     return issues;
   },
@@ -70,7 +75,10 @@ export const oauth2AuthProvider = defineProvider<OAuth2Auth>({
   applyToRequest(config, request) {
     if (!config.accessToken) return;
     const prefix = config.headerPrefix.trim();
-    request.headers.set('Authorization', prefix ? `${prefix} ${config.accessToken}` : config.accessToken);
+    request.headers.set(
+      'Authorization',
+      prefix ? `${prefix} ${config.accessToken}` : config.accessToken,
+    );
   },
 });
 
@@ -130,10 +138,14 @@ export const parseAuthorizationResponse = (input: string, expectedState: string)
   }
   const error = params.get('error');
   if (error) {
-    throw new AppError('AUTHENTICATION_ERROR', params.get('error_description') ?? `Authorization failed: ${error}`);
+    throw new AppError(
+      'AUTHENTICATION_ERROR',
+      params.get('error_description') ?? `Authorization failed: ${error}`,
+    );
   }
   const code = params.get('code');
-  if (!code) throw new AppError('AUTHENTICATION_ERROR', 'The redirect URL does not contain a code.');
+  if (!code)
+    throw new AppError('AUTHENTICATION_ERROR', 'The redirect URL does not contain a code.');
   const state = params.get('state');
   if (state !== null && state !== expectedState) {
     throw new AppError('AUTHENTICATION_ERROR', 'The authorization response state does not match.');
@@ -162,7 +174,8 @@ export const requestOAuthTokens = async (
   const form = new URLSearchParams();
   const grant = config.grantType;
   if (usesAuthorizationEndpoint(grant)) {
-    if (!options.code) throw new AppError('AUTHENTICATION_ERROR', 'An authorization code is required.');
+    if (!options.code)
+      throw new AppError('AUTHENTICATION_ERROR', 'An authorization code is required.');
     form.set('grant_type', 'authorization_code');
     form.set('code', options.code);
     if (config.callbackUrl) form.set('redirect_uri', config.callbackUrl);
@@ -174,7 +187,8 @@ export const requestOAuthTokens = async (
     form.set('username', config.username);
     form.set('password', config.password);
   } else {
-    if (!config.refreshToken) throw new AppError('AUTHENTICATION_ERROR', 'A refresh token is required.');
+    if (!config.refreshToken)
+      throw new AppError('AUTHENTICATION_ERROR', 'A refresh token is required.');
     form.set('grant_type', 'refresh_token');
     form.set('refresh_token', config.refreshToken);
   }
@@ -234,6 +248,8 @@ export const requestOAuthTokens = async (
       typeof payload.refresh_token === 'string' ? payload.refresh_token : config.refreshToken,
     tokenType: typeof payload.token_type === 'string' ? payload.token_type : 'Bearer',
     expiresAt:
-      Number.isFinite(expiresIn) && expiresIn > 0 ? (options.now ?? Date.now()) + expiresIn * 1000 : null,
+      Number.isFinite(expiresIn) && expiresIn > 0
+        ? (options.now ?? Date.now()) + expiresIn * 1000
+        : null,
   };
 };

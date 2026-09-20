@@ -1,5 +1,5 @@
 import { describe, expect, it } from 'vitest';
-import { createKeyValue } from '@httpreq/shared';
+import { createKeyValue, WORKSPACE_VERSION } from '@httpreq/shared';
 import { createDefaultWorkspace } from '@httpreq/workspace';
 import { LocalHistoryRepository, LocalWorkspaceRepository } from './index';
 
@@ -57,10 +57,26 @@ describe('LocalWorkspaceRepository', () => {
     const { storage } = memoryStorage();
     storage.setItem(
       'httpreq.workspace.default',
-      JSON.stringify({ id: 'default', name: 'Old', updatedAt: 'x', requests: [{ id: 'r', name: 'A', method: 'GET', url: 'https://a.dev', params: [], headers: [], body: { type: 'none', content: '' }, auth: { type: 'none' } }] }),
+      JSON.stringify({
+        id: 'default',
+        name: 'Old',
+        updatedAt: 'x',
+        requests: [
+          {
+            id: 'r',
+            name: 'A',
+            method: 'GET',
+            url: 'https://a.dev',
+            params: [],
+            headers: [],
+            body: { type: 'none', content: '' },
+            auth: { type: 'none' },
+          },
+        ],
+      }),
     );
     const workspace = await new LocalWorkspaceRepository(storage).getWorkspace('default');
-    expect(workspace).toMatchObject({ version: 2, openRequestIds: ['r'] });
+    expect(workspace).toMatchObject({ version: WORKSPACE_VERSION, openRequestIds: ['r'] });
   });
 
   it('stores drafts separately and removes the key when empty', async () => {

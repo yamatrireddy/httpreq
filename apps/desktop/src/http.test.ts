@@ -30,7 +30,10 @@ describe('executeHttp', () => {
       new AbortController().signal,
       fetchImpl,
     );
-    expect(result).toMatchObject({ ok: true, value: { body: '0123', truncated: true, sizeBytes: 4 } });
+    expect(result).toMatchObject({
+      ok: true,
+      value: { body: '0123', truncated: true, sizeBytes: 4 },
+    });
   });
 
   it('sends multipart bodies built from byte parts', async () => {
@@ -43,7 +46,12 @@ describe('executeHttp', () => {
           kind: 'multipart',
           parts: [
             { name: 'note', value: 'hi' },
-            { name: 'file', fileName: 'a.txt', contentType: 'text/plain', bytes: new Uint8Array([104, 105]) },
+            {
+              name: 'file',
+              fileName: 'a.txt',
+              contentType: 'text/plain',
+              bytes: new Uint8Array([104, 105]),
+            },
           ],
         },
       },

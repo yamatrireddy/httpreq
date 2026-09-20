@@ -9,7 +9,13 @@ import { useWorkbenchStore } from '../store';
  * Settings of a collection or folder. Its authorization is what requests (and sub-folders) set
  * to “Inherit from Parent” use. Changes apply immediately, like other structural edits.
  */
-export function ContainerSettingsDialog({ nodeId, onClose }: { nodeId: string | null; onClose: () => void }) {
+export function ContainerSettingsDialog({
+  nodeId,
+  onClose,
+}: {
+  nodeId: string | null;
+  onClose: () => void;
+}) {
   const workspace = useWorkbenchStore((state) => state.workspace);
   const updateContainer = useWorkbenchStore((state) => state.updateContainer);
   const renameNode = useWorkbenchStore((state) => state.renameNode);
@@ -29,7 +35,12 @@ export function ContainerSettingsDialog({ nodeId, onClose }: { nodeId: string | 
   const inherited = resolveInheritedAuth(workspace, kind === 'folder' ? node.node.parentId : null);
 
   return (
-    <Modal opened onClose={onClose} title={kind === 'collection' ? 'Collection settings' : 'Folder settings'} size="lg">
+    <Modal
+      opened
+      onClose={onClose}
+      title={kind === 'collection' ? 'Collection settings' : 'Folder settings'}
+      size="lg"
+    >
       <Stack gap="md">
         <TextInput
           label="Name"
@@ -41,7 +52,9 @@ export function ContainerSettingsDialog({ nodeId, onClose }: { nodeId: string | 
         <Textarea
           label="Description"
           value={node.node.description}
-          onChange={(event) => updateContainer(node.node.id, { description: event.currentTarget.value })}
+          onChange={(event) =>
+            updateContainer(node.node.id, { description: event.currentTarget.value })
+          }
           autosize
           minRows={2}
           maxRows={6}

@@ -1,6 +1,7 @@
 import { ActionIcon, CloseButton, FileButton, Menu, Text, TextInput, Tooltip } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import {
+  IconBolt,
   IconBox,
   IconChevronRight,
   IconCopy,
@@ -27,10 +28,10 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { collectSubtree, findNode } from '@httpreq/workspace';
+import { collectSubtree, findNode, isLeafNode } from '@httpreq/workspace';
 import { confirmAction } from '../confirm';
 import { downloadJson, exportCollection, fileNameFor, importFile } from '../exchange';
-import { methodColor } from '../methods';
+import { isLeafRow, methodColor } from '../methods';
 import { useWorkbenchStore } from '../store';
 import { buildRows, type TreeRow } from './rows';
 import classes from './Sidebar.module.css';
@@ -91,7 +92,7 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   }, [revealNonce, selectedId]);
 
   const open = (row: TreeRow) => {
-    if (row.kind === 'request') {
+    if (isLeafRow(row.kind)) {
       actions().openRequest(row.id);
       onOpened?.();
     } else {
@@ -103,16 +104,19 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   const remove = async (id: string) => {
     const node = findNode(workspace, id);
     if (!node) return;
-    const { requests } = collectSubtree(workspace, id);
-    const count = node.kind === 'request' ? 0 : requests.size;
+    const subtree = collectSubtree(workspace, id);
+    const requests = new Set([...subtree.requests, ...subtree.websockets]);
+    const count = isLeafNode(node) ? 0 : requests.size;
     const unsaved = [...requests].filter((requestId) => drafts[requestId]).length;
     const result = await confirmAction({
-      title: `Delete ${node.kind}`,
+      title: `Delete ${node.kind === 'websocket' ? 'WebSocket request' : node.kind}`,
       message:
         `Delete “${node.node.name}”` +
         (count ? ` and the ${count} request${count === 1 ? '' : 's'} inside it` : '') +
         '? This cannot be undone.' +
-        (unsaved ? ` ${unsaved} open request${unsaved === 1 ? ' has' : 's have'} unsaved changes.` : ''),
+        (unsaved
+          ? ` ${unsaved} open request${unsaved === 1 ? ' has' : 's have'} unsaved changes.`
+          : ''),
       confirmLabel: 'Delete',
       danger: true,
     });
@@ -131,7 +135,11 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       actions().applyImport(result.workspace, result.rootId, result.kind);
       notifications.show({ color: 'teal', message: `Imported “${file.name}”.` });
     } catch (error) {
-      notifications.show({ color: 'red', title: 'Import failed', message: (error as Error).message });
+      notifications.show({
+        color: 'red',
+        title: 'Import failed',
+        message: (error as Error).message,
+      });
     }
   };
 
@@ -163,13 +171,16 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
         break;
       case 'ArrowRight':
         handled();
-        if (row.kind !== 'request' && !row.expanded && row.hasChildren) actions().toggleExpanded(row.id, true);
+        if (!isLeafRow(row.kind) && !row.expanded && row.hasChildren)
+          actions().toggleExpanded(row.id, true);
         else if (row.expanded && rows[index + 1]) focusRow(rows[index + 1]!.id);
         break;
       case 'ArrowLeft':
         handled();
-        if (row.kind !== 'request' && row.expanded && !filter) actions().toggleExpanded(row.id, false);
-        else if (row.parentId && rows.some((item) => item.id === row.parentId)) focusRow(row.parentId);
+        if (!isLeafRow(row.kind) && row.expanded && !filter)
+          actions().toggleExpanded(row.id, false);
+        else if (row.parentId && rows.some((item) => item.id === row.parentId))
+          focusRow(row.parentId);
         break;
       case 'Enter':
       case ' ':
@@ -193,11 +204,11 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
     if (!source) return false;
     const node = findNode(workspace, source);
     if (!node) return false;
-    if (target === 'drafts') return node.kind === 'request';
+    if (target === 'drafts') return isLeafNode(node);
     if (target.id === source) return false;
     if (node.kind === 'collection') return target.kind === 'collection';
     if (node.kind === 'folder') {
-      const destination = target.kind === 'request' ? target.parentId : target.id;
+      const destination = isLeafRow(target.kind) ? target.parentId : target.id;
       return !!destination && !collectSubtree(workspace, source).containers.has(destination);
     }
     return true;
@@ -211,7 +222,7 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
     const node = findNode(workspace, source)!;
     if (target === 'drafts') actions().moveNode(source, null);
     else if (node.kind === 'collection') actions().moveNode(source, null, target.id);
-    else if (target.kind === 'request') actions().moveNode(source, target.parentId, target.id);
+    else if (isLeafRow(target.kind)) actions().moveNode(source, target.parentId, target.id);
     else actions().moveNode(source, target.id);
   };
 
@@ -223,7 +234,8 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       if (drop !== key) setDrop(key);
     },
     onDragLeave: (event: DragEvent) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node)) setDrop((current) => (current === key ? null : current));
+      if (!event.currentTarget.contains(event.relatedTarget as Node))
+        setDrop((current) => (current === key ? null : current));
     },
     onDrop: (event: DragEvent) => {
       event.preventDefault();
@@ -249,6 +261,7 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       onCancelRename={() => actions().setRenaming(null)}
       onStartRename={() => actions().setRenaming(row.id)}
       onNewRequest={() => actions().createRequest(row.id)}
+      onNewWebSocket={() => actions().createWebSocketRequest(row.id)}
       onNewFolder={() => actions().createFolder(row.id)}
       onDuplicate={() => actions().duplicateNode(row.id)}
       onDelete={() => void remove(row.id)}
@@ -277,7 +290,13 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
           Collections
         </Text>
         <Tooltip label="New collection">
-          <ActionIcon variant="subtle" color="gray" size="sm" aria-label="New collection" onClick={() => actions().createCollection()}>
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            aria-label="New collection"
+            onClick={() => actions().createCollection()}
+          >
             <IconPlus size={15} />
           </ActionIcon>
         </Tooltip>
@@ -288,7 +307,10 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
             </ActionIcon>
           </Menu.Target>
           <Menu.Dropdown>
-            <Menu.Item leftSection={<IconBox size={14} />} onClick={() => actions().createCollection()}>
+            <Menu.Item
+              leftSection={<IconBox size={14} />}
+              onClick={() => actions().createCollection()}
+            >
               New collection
             </Menu.Item>
             <Menu.Item
@@ -300,7 +322,10 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
             >
               New draft request
             </Menu.Item>
-            <FileButton onChange={(file) => void importFromFile(file)} accept="application/json,.json">
+            <FileButton
+              onChange={(file) => void importFromFile(file)}
+              accept="application/json,.json"
+            >
               {(props) => (
                 <Menu.Item {...props} leftSection={<IconFileImport size={14} />}>
                   Import…
@@ -334,15 +359,14 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
             focusRow(rows[0].id);
           }
         }}
-        rightSection={filter ? <CloseButton size="xs" aria-label="Clear filter" onClick={() => setFilter('')} /> : null}
+        rightSection={
+          filter ? (
+            <CloseButton size="xs" aria-label="Clear filter" onClick={() => setFilter('')} />
+          ) : null
+        }
       />
 
-      <div
-        role="tree"
-        aria-label="Collections"
-        className={classes.tree}
-        onKeyDown={onKeyDown}
-      >
+      <div role="tree" aria-label="Collections" className={classes.tree} onKeyDown={onKeyDown}>
         {collections.map(renderRow)}
         {workspace.collections.length === 0 && !filter && (
           <div className={classes.emptyTree}>
@@ -351,7 +375,11 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
             </Text>
             <ActionIcon.Group>
               <Tooltip label="New collection">
-                <ActionIcon variant="light" aria-label="Create a collection" onClick={() => actions().createCollection()}>
+                <ActionIcon
+                  variant="light"
+                  aria-label="Create a collection"
+                  onClick={() => actions().createCollection()}
+                >
                   <IconPlus size={15} />
                 </ActionIcon>
               </Tooltip>
@@ -399,6 +427,7 @@ interface RowProps {
   onCancelRename: () => void;
   onStartRename: () => void;
   onNewRequest: () => void;
+  onNewWebSocket: () => void;
   onNewFolder: () => void;
   onDuplicate: () => void;
   onDelete: () => void;
@@ -423,6 +452,7 @@ const ExplorerRow = memo(function ExplorerRow({
   onCancelRename,
   onStartRename,
   onNewRequest,
+  onNewWebSocket,
   onNewFolder,
   onDuplicate,
   onDelete,
@@ -430,7 +460,7 @@ const ExplorerRow = memo(function ExplorerRow({
   onExport,
   dragProps,
 }: RowProps) {
-  const container = row.kind !== 'request';
+  const container = !isLeafRow(row.kind);
   const [name, setName] = useState(row.name);
   useEffect(() => {
     if (renaming) setName(row.name);
@@ -460,20 +490,27 @@ const ExplorerRow = memo(function ExplorerRow({
       onFocus={(event) => event.target === event.currentTarget && onFocusRow(row.id)}
       onContextMenu={onContextMenu}
       onDoubleClick={(event) => {
-        if (row.kind === 'request') {
+        if (isLeafRow(row.kind)) {
           event.preventDefault();
           onStartRename();
         }
       }}
-      title={row.kind === 'request' && row.url ? `${row.method} ${row.url}` : row.name}
+      title={row.url ? `${row.kind === 'websocket' ? 'WS' : row.method} ${row.url}` : row.name}
       {...dragProps}
     >
       <span className={classes.chevron} data-open={row.expanded || undefined} aria-hidden>
         {container && row.hasChildren && <IconChevronRight size={13} />}
       </span>
       {row.kind === 'request' ? (
-        <span className={classes.method} style={{ color: `var(--mantine-color-${methodColor[row.method!]}-text)` }}>
+        <span
+          className={classes.method}
+          style={{ color: `var(--mantine-color-${methodColor[row.method!]}-text)` }}
+        >
           {row.method === 'DELETE' ? 'DEL' : row.method === 'OPTIONS' ? 'OPT' : row.method}
+        </span>
+      ) : row.kind === 'websocket' ? (
+        <span className={classes.method} style={{ color: 'var(--mantine-color-violet-text)' }}>
+          WS
         </span>
       ) : (
         <Icon size={15} className={classes.nodeIcon} aria-hidden />
@@ -500,17 +537,41 @@ const ExplorerRow = memo(function ExplorerRow({
       )}
       {unsaved && <span className={classes.unsavedDot} aria-label="unsaved changes" />}
 
-      <span className={classes.rowActions} data-open={menuOpen || undefined} onClick={(event) => event.stopPropagation()}>
+      <span
+        className={classes.rowActions}
+        data-open={menuOpen || undefined}
+        onClick={(event) => event.stopPropagation()}
+      >
         {container && (
           <Tooltip label="New request">
-            <ActionIcon variant="subtle" color="gray" size="xs" tabIndex={-1} aria-label={`New request in ${row.name}`} onClick={onNewRequest}>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="xs"
+              tabIndex={-1}
+              aria-label={`New request in ${row.name}`}
+              onClick={onNewRequest}
+            >
               <IconPlus size={13} />
             </ActionIcon>
           </Tooltip>
         )}
-        <Menu opened={menuOpen} onChange={onMenuChange} position="bottom-end" withinPortal shadow="md" width={210}>
+        <Menu
+          opened={menuOpen}
+          onChange={onMenuChange}
+          position="bottom-end"
+          withinPortal
+          shadow="md"
+          width={210}
+        >
           <Menu.Target>
-            <ActionIcon variant="subtle" color="gray" size="xs" tabIndex={-1} aria-label={`Actions for ${row.name}`}>
+            <ActionIcon
+              variant="subtle"
+              color="gray"
+              size="xs"
+              tabIndex={-1}
+              aria-label={`Actions for ${row.name}`}
+            >
               <IconDots size={13} />
             </ActionIcon>
           </Menu.Target>
@@ -519,6 +580,9 @@ const ExplorerRow = memo(function ExplorerRow({
               <>
                 <Menu.Item leftSection={<IconPlus size={14} />} onClick={onNewRequest}>
                   New request
+                </Menu.Item>
+                <Menu.Item leftSection={<IconBolt size={14} />} onClick={onNewWebSocket}>
+                  New WebSocket request
                 </Menu.Item>
                 <Menu.Item leftSection={<IconFolderPlus size={14} />} onClick={onNewFolder}>
                   New folder
@@ -529,7 +593,15 @@ const ExplorerRow = memo(function ExplorerRow({
                 <Menu.Divider />
               </>
             )}
-            <Menu.Item leftSection={<IconPencil size={14} />} rightSection={<Text size="xs" c="dimmed">F2</Text>} onClick={onStartRename}>
+            <Menu.Item
+              leftSection={<IconPencil size={14} />}
+              rightSection={
+                <Text size="xs" c="dimmed">
+                  F2
+                </Text>
+              }
+              onClick={onStartRename}
+            >
               Rename
             </Menu.Item>
             <Menu.Item leftSection={<IconCopy size={14} />} onClick={onDuplicate}>

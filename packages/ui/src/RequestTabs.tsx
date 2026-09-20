@@ -17,14 +17,26 @@ import {
   type KeyboardEvent,
   type ReactNode,
 } from 'react';
-import type { HttpMethod, HttpRequest } from '@httpreq/shared';
+import type { HttpMethod } from '@httpreq/shared';
 import { methodColor, REQUEST_PANEL_ID, requestTabId } from './methods';
 import classes from './RequestTabs.module.css';
 
-type TabRequest = Pick<HttpRequest, 'id' | 'name' | 'method' | 'url'>;
+/** What a tab can hold: an HTTP request, a WebSocket request, or an SSH terminal. */
+export type TabKind = 'request' | 'websocket' | 'ssh';
+
+export interface TabItem {
+  id: string;
+  kind: TabKind;
+  name: string;
+  /** HTTP tabs only. */
+  method?: HttpMethod;
+  url?: string;
+  /** Live state for WebSocket and SSH tabs, shown as a dot on the tab. */
+  connected?: boolean;
+}
 
 interface Props {
-  requests: TabRequest[];
+  requests: TabItem[];
   activeId: string;
   unsavedIds: ReadonlySet<string>;
   onActivate: (id: string) => void;
@@ -361,7 +373,7 @@ export const RequestTabs = memo(function RequestTabs({
             <Menu.Item
               key={request.id}
               onClick={() => onActivate(request.id)}
-              leftSection={<MethodLabel method={request.method} />}
+              leftSection={<TabBadge item={request} />}
               rightSection={request.id === activeId ? <span aria-hidden>●</span> : undefined}
               aria-current={request.id === activeId ? 'true' : undefined}
             >
@@ -386,7 +398,7 @@ export const RequestTabs = memo(function RequestTabs({
 
 interface ContextMenuProps {
   target: { id: string; x: number; y: number } | null;
-  requests: TabRequest[];
+  requests: TabItem[];
   onClose: () => void;
   onRun: (ids: string[]) => void;
 }
@@ -438,19 +450,23 @@ function TabContextMenu({ target, requests, onClose, onRun }: ContextMenuProps) 
   );
 }
 
-function MethodLabel({ method }: { method: HttpMethod }) {
+/** The short kind badge at the left of a tab: an HTTP verb, or WS / SSH. */
+function TabBadge({ item }: { item: TabItem }) {
+  const { label, color } =
+    item.kind === 'websocket'
+      ? { label: 'WS', color: 'violet' }
+      : item.kind === 'ssh'
+        ? { label: 'SSH', color: 'cyan' }
+        : { label: item.method ?? 'GET', color: methodColor[item.method ?? 'GET'] };
   return (
-    <span
-      className={classes.method}
-      style={{ color: `var(--mantine-color-${methodColor[method]}-text)` }}
-    >
-      {method}
+    <span className={classes.method} style={{ color: `var(--mantine-color-${color}-text)` }}>
+      {label}
     </span>
   );
 }
 
 interface TabProps {
-  request: TabRequest;
+  request: TabItem;
   active: boolean;
   unsaved: boolean;
   tabbable: boolean;
@@ -518,15 +534,22 @@ const RequestTab = memo(function RequestTab({
         aria-controls={REQUEST_PANEL_ID}
         aria-keyshortcuts={closable ? 'Delete' : undefined}
         tabIndex={tabbable ? 0 : -1}
-        title={request.url ? `${request.name}\n${request.method} ${request.url}` : request.name}
+        title={
+          request.url
+            ? `${request.name}\n${request.kind === 'websocket' ? 'WS' : (request.method ?? '')} ${request.url}`
+            : request.name
+        }
         onClick={() => onActivate(request.id)}
         onFocus={() => onFocus(request.id)}
       >
-        <MethodLabel method={request.method} />
+        <TabBadge item={request} />
         <span className={classes.name}>{request.name}</span>
         {unsaved && <VisuallyHidden>(unsaved changes)</VisuallyHidden>}
       </button>
       <span className={classes.trailing}>
+        {request.connected && (
+          <span className={classes.connectedDot} aria-label="connected" title="Connected" />
+        )}
         {unsaved && <span className={classes.unsavedDot} aria-hidden />}
         {closable && (
           <button

@@ -77,7 +77,11 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
       applyTokens(await task());
       return true;
     } catch (error) {
-      notifications.show({ color: 'red', title: 'Token request failed', message: (error as Error).message });
+      notifications.show({
+        color: 'red',
+        title: 'Token request failed',
+        message: (error as Error).message,
+      });
       return false;
     } finally {
       setBusy(false);
@@ -92,12 +96,22 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
     try {
       const pkce = grant === 'authorization_code_pkce' ? await createPkcePair() : undefined;
       const state = createOAuthState();
-      const resolved = { ...config, authUrl: services.resolve(config.authUrl), clientId: services.resolve(config.clientId), scope: services.resolve(config.scope), callbackUrl: services.resolve(config.callbackUrl) };
+      const resolved = {
+        ...config,
+        authUrl: services.resolve(config.authUrl),
+        clientId: services.resolve(config.clientId),
+        scope: services.resolve(config.scope),
+        callbackUrl: services.resolve(config.callbackUrl),
+      };
       const url = buildAuthorizationUrl(resolved, { state, codeChallenge: pkce?.challenge });
       setRedirect('');
       setPending({ url, state, verifier: pkce?.verifier });
     } catch (error) {
-      notifications.show({ color: 'red', title: 'Cannot start authorization', message: (error as Error).message });
+      notifications.show({
+        color: 'red',
+        title: 'Cannot start authorization',
+        message: (error as Error).message,
+      });
     }
   };
 
@@ -128,15 +142,40 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
         comboboxProps={{ withinPortal: true }}
       />
       {usesCode(grant) && (
-        <Field label="Authorization URL" placeholder="https://auth.example.com/authorize" value={config.authUrl} onChange={(authUrl) => set({ authUrl })} />
+        <Field
+          label="Authorization URL"
+          placeholder="https://auth.example.com/authorize"
+          value={config.authUrl}
+          onChange={(authUrl) => set({ authUrl })}
+        />
       )}
-      <Field label="Access token URL" placeholder="https://auth.example.com/token" value={config.tokenUrl} onChange={(tokenUrl) => set({ tokenUrl })} />
+      <Field
+        label="Access token URL"
+        placeholder="https://auth.example.com/token"
+        value={config.tokenUrl}
+        onChange={(tokenUrl) => set({ tokenUrl })}
+      />
       <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm">
-        <Field label="Client ID" value={config.clientId} onChange={(clientId) => set({ clientId })} />
-        <Field label="Client secret" masked value={config.clientSecret} onChange={(clientSecret) => set({ clientSecret })} />
+        <Field
+          label="Client ID"
+          value={config.clientId}
+          onChange={(clientId) => set({ clientId })}
+        />
+        <Field
+          label="Client secret"
+          masked
+          value={config.clientSecret}
+          onChange={(clientSecret) => set({ clientSecret })}
+        />
       </SimpleGrid>
       <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm">
-        <Field label="Scope" placeholder="read write" mono={false} value={config.scope} onChange={(scope) => set({ scope })} />
+        <Field
+          label="Scope"
+          placeholder="read write"
+          mono={false}
+          value={config.scope}
+          onChange={(scope) => set({ scope })}
+        />
         {usesCode(grant) ? (
           <Field
             label="Callback URL"
@@ -153,19 +192,35 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
               { value: 'basic-header', label: 'Send as Basic Auth header' },
               { value: 'body', label: 'Send in the request body' },
             ]}
-            onChange={(value) => value && set({ clientAuthentication: value as OAuth2Auth['clientAuthentication'] })}
+            onChange={(value) =>
+              value && set({ clientAuthentication: value as OAuth2Auth['clientAuthentication'] })
+            }
             comboboxProps={{ withinPortal: true }}
           />
         )}
       </SimpleGrid>
       {grant === 'password' && (
         <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm">
-          <Field label="Username" value={config.username} onChange={(username) => set({ username })} />
-          <Field label="Password" masked value={config.password} onChange={(password) => set({ password })} />
+          <Field
+            label="Username"
+            value={config.username}
+            onChange={(username) => set({ username })}
+          />
+          <Field
+            label="Password"
+            masked
+            value={config.password}
+            onChange={(password) => set({ password })}
+          />
         </SimpleGrid>
       )}
       {grant === 'refresh_token' && (
-        <Field label="Refresh token" masked value={config.refreshToken} onChange={(refreshToken) => set({ refreshToken })} />
+        <Field
+          label="Refresh token"
+          masked
+          value={config.refreshToken}
+          onChange={(refreshToken) => set({ refreshToken })}
+        />
       )}
 
       <Divider label="Current token" labelPosition="left" />
@@ -205,7 +260,11 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
         />
       </SimpleGrid>
       <Group gap="xs">
-        <Button leftSection={<IconKey size={15} />} loading={busy && !pending} onClick={() => void getToken()}>
+        <Button
+          leftSection={<IconKey size={15} />}
+          loading={busy && !pending}
+          onClick={() => void getToken()}
+        >
           Get New Access Token
         </Button>
         {config.refreshToken && grant !== 'refresh_token' && (
@@ -213,7 +272,9 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
             variant="default"
             leftSection={<IconRefresh size={15} />}
             disabled={busy}
-            onClick={() => void run(() => services.requestTokens({ ...config, grantType: 'refresh_token' }))}
+            onClick={() =>
+              void run(() => services.requestTokens({ ...config, grantType: 'refresh_token' }))
+            }
           >
             Refresh
           </Button>
@@ -229,14 +290,20 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
         )}
       </Group>
 
-      <Modal opened={!!pending} onClose={() => setPending(null)} title="Authorize HttpReq" size="lg">
+      <Modal
+        opened={!!pending}
+        onClose={() => setPending(null)}
+        title="Authorize HttpReq"
+        size="lg"
+      >
         {pending && (
           <Stack gap="sm">
-            <Text size="sm">
-              1. Open the authorization page, sign in and approve access.
-            </Text>
+            <Text size="sm">1. Open the authorization page, sign in and approve access.</Text>
             <Group gap="xs">
-              <Button leftSection={<IconExternalLink size={15} />} onClick={() => services.openUrl(pending.url)}>
+              <Button
+                leftSection={<IconExternalLink size={15} />}
+                onClick={() => services.openUrl(pending.url)}
+              >
                 Open authorization page
               </Button>
               <CopyButton value={pending.url}>
@@ -248,8 +315,8 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
               </CopyButton>
             </Group>
             <Text size="sm">
-              2. After approving, the provider redirects to your callback URL. Paste that full URL (or
-              the code) here.
+              2. After approving, the provider redirects to your callback URL. Paste that full URL
+              (or the code) here.
             </Text>
             <Textarea
               aria-label="Redirect URL"
@@ -262,7 +329,10 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
             />
             {grant === 'authorization_code_pkce' && (
               <Alert color="gray" variant="light" p="xs">
-                <Text size="xs">PKCE (S256) protects this exchange; the verifier never leaves HttpReq until the code is exchanged.</Text>
+                <Text size="xs">
+                  PKCE (S256) protects this exchange; the verifier never leaves HttpReq until the
+                  code is exchanged.
+                </Text>
               </Alert>
             )}
             <Group justify="flex-end">

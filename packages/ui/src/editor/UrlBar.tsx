@@ -80,9 +80,18 @@ export function UrlBar({
           allowDeselect={false}
           withCheckIcon={false}
           onChange={(value) => value && onMethodChange(value as HttpMethod)}
-          comboboxProps={{ withinPortal: true, width: 120, middlewares: { flip: true, shift: true } }}
+          comboboxProps={{
+            withinPortal: true,
+            width: 120,
+            middlewares: { flip: true, shift: true },
+          }}
           renderOption={({ option }) => (
-            <span className={classes.methodOption} style={{ color: `var(--mantine-color-${methodColor[option.value as HttpMethod]}-text)` }}>
+            <span
+              className={classes.methodOption}
+              style={{
+                color: `var(--mantine-color-${methodColor[option.value as HttpMethod]}-text)`,
+              }}
+            >
               {option.value}
             </span>
           )}
@@ -103,7 +112,13 @@ export function UrlBar({
           value={url}
           onChange={onUrlChange}
           onKeyDown={(event) => {
-            if (event.key === 'Enter' && !event.ctrlKey && !event.metaKey && !event.shiftKey && !event.altKey) {
+            if (
+              event.key === 'Enter' &&
+              !event.ctrlKey &&
+              !event.metaKey &&
+              !event.shiftKey &&
+              !event.altKey
+            ) {
               event.preventDefault();
               onSend();
             }
@@ -116,7 +131,13 @@ export function UrlBar({
           className={classes.saveButton}
           variant={saveState === 'failed' ? 'light' : 'default'}
           color={saveState === 'failed' ? 'red' : undefined}
-          leftSection={saveState === 'failed' ? <IconAlertTriangle size={15} /> : <IconDeviceFloppy size={15} />}
+          leftSection={
+            saveState === 'failed' ? (
+              <IconAlertTriangle size={15} />
+            ) : (
+              <IconDeviceFloppy size={15} />
+            )
+          }
           loading={saveState === 'saving'}
           data-state={saveState}
           aria-keyshortcuts={saveShortcut}
@@ -145,7 +166,12 @@ export function UrlBar({
 
       <Menu position="bottom-end" withinPortal shadow="md" width={220}>
         <Menu.Target>
-          <ActionIcon variant="default" size={30} aria-label="More request actions" className={classes.overflow}>
+          <ActionIcon
+            variant="default"
+            size={30}
+            aria-label="More request actions"
+            className={classes.overflow}
+          >
             <IconDots size={16} />
           </ActionIcon>
         </Menu.Target>

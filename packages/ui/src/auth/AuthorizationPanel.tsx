@@ -1,7 +1,17 @@
 import { Alert, Anchor, Button, Group, Select, Stack, Text, ThemeIcon } from '@mantine/core';
-import { IconAlertTriangle, IconArrowUpRight, IconShieldLock, IconSitemap } from '@tabler/icons-react';
+import {
+  IconAlertTriangle,
+  IconArrowUpRight,
+  IconShieldLock,
+  IconSitemap,
+} from '@tabler/icons-react';
 import type { ComponentType } from 'react';
-import { AUTH_TYPES, authProviders, getAuthProvider, type EffectiveAuth } from '@httpreq/api-client';
+import {
+  AUTH_TYPES,
+  authProviders,
+  getAuthProvider,
+  type EffectiveAuth,
+} from '@httpreq/api-client';
 import type { AuthConfig, AuthType } from '@httpreq/shared';
 import type { AuthEditorProps } from './authServices';
 import { authEditors } from './editorRegistry';
@@ -22,13 +32,26 @@ interface Props {
   onShowSource?: (id: string) => void;
 }
 
-const sourceKind = { request: 'Request', folder: 'Folder', collection: 'Collection', none: '' } as const;
+const sourceKind = {
+  request: 'Request',
+  folder: 'Folder',
+  collection: 'Collection',
+  none: '',
+} as const;
 
 /**
  * Authorization type selector plus the selected provider's editor. The panel knows nothing about
  * individual schemes: labels come from the provider registry and fields from the editor registry.
  */
-export function AuthorizationPanel({ auth, onChange, inherited, canInherit, owner, conflicts = [], onShowSource }: Props) {
+export function AuthorizationPanel({
+  auth,
+  onChange,
+  inherited,
+  canInherit,
+  owner,
+  conflicts = [],
+  onShowSource,
+}: Props) {
   const provider = getAuthProvider(auth);
   const Editor = authEditors[auth.type] as ComponentType<AuthEditorProps<AuthConfig>> | null;
   const warnings = provider.validate(auth).filter((issue) => issue.severity === 'warning');
@@ -46,7 +69,9 @@ export function AuthorizationPanel({ auth, onChange, inherited, canInherit, owne
           allowDeselect={false}
           data={options}
           maw={320}
-          onChange={(type) => type && type !== auth.type && onChange(authProviders[type as AuthType].create())}
+          onChange={(type) =>
+            type && type !== auth.type && onChange(authProviders[type as AuthType].create())
+          }
           comboboxProps={{ withinPortal: true, middlewares: { flip: true, shift: true } }}
         />
         {auth.type !== 'none' && auth.type !== 'inherit' && (
@@ -138,8 +163,8 @@ export function AuthorizationPanel({ auth, onChange, inherited, canInherit, owne
       {conflicts.length > 0 && auth.type !== 'none' && (
         <Alert color="yellow" variant="light" icon={<IconAlertTriangle size={16} />} p="xs">
           <Text size="xs">
-            The {conflicts.join(', ')} header configured in Headers is replaced by this authorization,
-            so it is sent only once.
+            The {conflicts.join(', ')} header configured in Headers is replaced by this
+            authorization, so it is sent only once.
           </Text>
         </Alert>
       )}

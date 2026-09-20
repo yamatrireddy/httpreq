@@ -29,7 +29,10 @@ const environment: Environment = {
 /** Collection (bearer) → v1 → auth → admin → adminLogin (inherit). */
 const tree = () => {
   const workspace = createDefaultWorkspace();
-  const collection = { ...createCollection('Account API'), auth: { type: 'bearer' as const, token: '{{accessToken}}', prefix: 'Bearer' } };
+  const collection = {
+    ...createCollection('Account API'),
+    auth: { type: 'bearer' as const, token: '{{accessToken}}', prefix: 'Bearer' },
+  };
   const v1 = createFolder(collection.id, 'v1');
   const auth = createFolder(v1.id, 'auth');
   const admin = createFolder(auth.id, 'admin');
@@ -71,15 +74,23 @@ describe('buildRequest', () => {
       folder.id === admin.id ? { ...folder, auth: { type: 'none' as const } } : folder,
     );
     const effective = resolveEffectiveAuth({ ...workspace, folders }, request);
-    expect(effective).toMatchObject({ auth: { type: 'none' }, source: { kind: 'folder', name: 'admin' } });
+    expect(effective).toMatchObject({
+      auth: { type: 'none' },
+      source: { kind: 'folder', name: 'admin' },
+    });
   });
 
   it('flags a manual Authorization header instead of sending both', async () => {
     const { workspace, request } = tree();
-    const withHeader = { ...request, headers: [createKeyValue({ key: 'authorization', value: 'Basic x' })] };
+    const withHeader = {
+      ...request,
+      headers: [createKeyValue({ key: 'authorization', value: 'Basic x' })],
+    };
     const built = await buildRequest(withHeader, { workspace, environment });
     expect(findHeaderConflicts(withHeader, built.effectiveAuth)).toEqual(['authorization']);
-    expect(Object.keys(built.prepared.headers).filter((name) => name.toLowerCase() === 'authorization')).toHaveLength(1);
+    expect(
+      Object.keys(built.prepared.headers).filter((name) => name.toLowerCase() === 'authorization'),
+    ).toHaveLength(1);
     expect(built.prepared.headers.Authorization).toBe('Bearer tok-123');
     expect(built.warnings[0]).toMatch(/replaced the manual authorization header/);
   });
@@ -169,7 +180,10 @@ describe('executeRequest', () => {
     const execute = vi
       .fn<HttpRuntime['execute']>()
       .mockResolvedValueOnce(
-        ok({ status: 401, headers: { 'www-authenticate': 'Digest realm="r", nonce="n", qop="auth"' } }),
+        ok({
+          status: 401,
+          headers: { 'www-authenticate': 'Digest realm="r", nonce="n", qop="auth"' },
+        }),
       )
       .mockResolvedValueOnce(ok());
     const request: HttpRequest = {
@@ -184,7 +198,9 @@ describe('executeRequest', () => {
     );
     expect(result.response.status).toBe(200);
     expect(execute).toHaveBeenCalledTimes(2);
-    expect(execute.mock.calls[1]![0].headers.Authorization).toMatch(/^Digest username="u", realm="r"/);
+    expect(execute.mock.calls[1]![0].headers.Authorization).toMatch(
+      /^Digest username="u", realm="r"/,
+    );
   });
 
   it('reports request timeouts as CONNECTION_TIMEOUT', async () => {
@@ -198,7 +214,11 @@ describe('executeRequest', () => {
       settings: { ...createEmptyRequest().settings, timeoutMs: 10 },
     };
     await expect(
-      executeRequest(request, { workspace: createDefaultWorkspace(), environment: null }, { kind: 'browser', execute }),
+      executeRequest(
+        request,
+        { workspace: createDefaultWorkspace(), environment: null },
+        { kind: 'browser', execute },
+      ),
     ).rejects.toMatchObject({ code: 'CONNECTION_TIMEOUT' });
   });
 });

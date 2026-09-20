@@ -1,5 +1,12 @@
+export * from './capabilities';
 export * from './model';
-import type { HistoryEntry, HttpMethod, HttpRequest, Workspace } from './model';
+export * from './ssh';
+export * from './validation';
+export * from './websocket';
+
+import type { HistoryEntry, HttpMethod, HttpRequest, Workspace, WorkspaceMeta } from './model';
+import type { SshBridge, TunnelBridge } from './ssh';
+import type { PreparedWebSocket, WebSocketEvent } from './websocket';
 
 export type PreparedBody =
   | { kind: 'text'; text: string }
@@ -49,11 +56,20 @@ export interface HttpRuntime {
   execute(request: PreparedRequest, signal?: AbortSignal): Promise<HttpResponse>;
 }
 
+/**
+ * Storage for every workspace. Implementations differ only in where the bytes land (browser
+ * IndexedDB, desktop application data); the workspace semantics live above this interface.
+ */
 export interface WorkspaceRepository {
+  /** Every known workspace, most recently updated first. */
+  listWorkspaces(): Promise<WorkspaceMeta[]>;
   getWorkspace(id: string): Promise<Workspace | null>;
   saveWorkspace(workspace: Workspace): Promise<void>;
   deleteWorkspace(id: string): Promise<void>;
-  /** Unsaved edits of open requests, kept so they survive a reload. */
+  /** Id of the workspace to restore on the next start, when it still exists. */
+  getActiveWorkspaceId(): Promise<string | null>;
+  setActiveWorkspaceId(id: string): Promise<void>;
+  /** Unsaved edits of open requests, kept so they survive a reload. Keyed by request id. */
   getDrafts(workspaceId: string): Promise<Record<string, HttpRequest>>;
   saveDrafts(workspaceId: string, drafts: Record<string, HttpRequest>): Promise<void>;
 }
@@ -184,31 +200,30 @@ export interface DesktopBridge {
   onMenuCommand(listener: (command: MenuCommand) => void): () => void;
 }
 
-/** Operations the Electron preload exposes to the renderer as `window.httpreq`. */
+/**
+ * WebSocket operations the preload exposes. The main process owns the socket, so the renderer
+ * gets events and never a handle to anything privileged.
+ */
+export interface WebSocketBridge {
+  open(socketId: string, prepared: PreparedWebSocket): Promise<IpcResult<void>>;
+  sendText(socketId: string, data: string): void;
+  /** Binary frames cross IPC as a plain byte array. */
+  sendBinary(socketId: string, data: Uint8Array): void;
+  close(socketId: string, code?: number, reason?: string): void;
+  onEvent(listener: (socketId: string, event: WebSocketEvent) => void): () => void;
+}
+
+/**
+ * Operations the Electron preload exposes to the renderer as `window.httpreq`.
+ *
+ * Each capability is optional: the renderer must treat a missing bridge as "this platform cannot
+ * do that" rather than assuming a desktop build has everything.
+ */
 export interface HttpReqBridge {
   executeHttp(request: PreparedRequest, executionId: string): Promise<IpcResult<HttpResponse>>;
   cancelHttp(executionId: string): void;
   desktop?: DesktopBridge;
-}
-
-export interface WebSocketRuntime {
-  connect(config: unknown): Promise<unknown>;
-}
-
-export interface SshRuntime {
-  connect(config: unknown): Promise<unknown>;
-}
-
-export interface FileTransferRuntime {
-  list(path: string): Promise<unknown[]>;
-}
-
-export interface TunnelRuntime {
-  open(config: unknown): Promise<unknown>;
-}
-
-export type Feature = 'rest' | 'websocket' | 'ssh' | 'file-transfer' | 'tunnel';
-
-export interface EntitlementService {
-  hasFeature(feature: Feature): boolean;
+  webSocket?: WebSocketBridge;
+  ssh?: SshBridge;
+  tunnels?: TunnelBridge;
 }

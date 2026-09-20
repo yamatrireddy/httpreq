@@ -30,7 +30,9 @@ export const parseDigestChallenge = (header: string): DigestChallenge | null => 
 };
 
 const hashHex = async (algorithm: string, text: string) =>
-  algorithm.toUpperCase().startsWith('SHA-256') ? hex(await sha256(utf8(text))) : hex(md5(utf8(text)));
+  algorithm.toUpperCase().startsWith('SHA-256')
+    ? hex(await sha256(utf8(text)))
+    : hex(md5(utf8(text)));
 
 /** Builds the `Authorization: Digest ...` answer to a challenge (RFC 7616, qop="auth"). */
 export const buildDigestAuthorization = async (options: {
@@ -54,7 +56,8 @@ export const buildDigestAuthorization = async (options: {
     : undefined;
 
   let ha1 = await hashHex(algorithm, `${username}:${challenge.realm}:${password}`);
-  if (/-sess$/i.test(algorithm)) ha1 = await hashHex(algorithm, `${ha1}:${challenge.nonce}:${cnonce}`);
+  if (/-sess$/i.test(algorithm))
+    ha1 = await hashHex(algorithm, `${ha1}:${challenge.nonce}:${cnonce}`);
   const ha2 = await hashHex(algorithm, `${method}:${uri}`);
   const response = qop
     ? await hashHex(algorithm, `${ha1}:${challenge.nonce}:${nc}:${cnonce}:${qop}:${ha2}`)
@@ -86,7 +89,9 @@ export const digestAuthProvider = defineProvider<DigestAuth>({
   secretFields: ['password'],
   create: () => ({ type: 'digest', username: '', password: '' }),
   validate: (config) =>
-    config.username.trim() ? [] : [{ field: 'username', message: 'Enter a username.', severity: 'warning' }],
+    config.username.trim()
+      ? []
+      : [{ field: 'username', message: 'Enter a username.', severity: 'warning' }],
   appliedHeaders: () => ['Authorization'],
   applyToRequest: () => undefined,
   async handleChallenge(config, request, response) {

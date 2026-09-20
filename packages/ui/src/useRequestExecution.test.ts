@@ -46,7 +46,9 @@ describe('useRequestExecution', () => {
     const { result } = renderHook(() => useRequestExecution());
     await act(async () => {
       await expect(
-        result.current.send('a', () => Promise.reject(new AppError('NETWORK_ERROR', 'Connection refused.'))),
+        result.current.send('a', () =>
+          Promise.reject(new AppError('NETWORK_ERROR', 'Connection refused.')),
+        ),
       ).resolves.toEqual({ kind: 'failed', message: 'Connection refused.', code: 'NETWORK_ERROR' });
     });
   });

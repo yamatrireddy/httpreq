@@ -26,7 +26,11 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
         ...environments.map((environment) => ({ value: environment.id, label: environment.name })),
       ]}
       onChange={(value) => setActive(!value || value === NONE ? null : value)}
-      comboboxProps={{ withinPortal: true, position: 'bottom-end', middlewares: { flip: true, shift: true } }}
+      comboboxProps={{
+        withinPortal: true,
+        position: 'bottom-end',
+        middlewares: { flip: true, shift: true },
+      }}
     />
   );
 });

@@ -36,9 +36,9 @@ export const sha256 = async (bytes: Uint8Array) =>
 /* MD5 (RFC 1321). Web Crypto does not provide it, but HTTP Digest authentication still needs it. */
 
 const SHIFTS = [
-  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9,
-  14, 20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21,
-  6, 10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
+  7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 7, 12, 17, 22, 5, 9, 14, 20, 5, 9, 14, 20, 5, 9, 14,
+  20, 5, 9, 14, 20, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 4, 11, 16, 23, 6, 10, 15, 21, 6,
+  10, 15, 21, 6, 10, 15, 21, 6, 10, 15, 21,
 ];
 const CONSTANTS = Array.from({ length: 64 }, (_, index) =>
   Math.floor(Math.abs(Math.sin(index + 1)) * 2 ** 32),
@@ -59,7 +59,8 @@ export const md5 = (input: Uint8Array): Uint8Array => {
   let d0 = 0x10325476;
   const words = new Uint32Array(16);
   for (let offset = 0; offset < padded.length; offset += 64) {
-    for (let index = 0; index < 16; index += 1) words[index] = view.getUint32(offset + index * 4, true);
+    for (let index = 0; index < 16; index += 1)
+      words[index] = view.getUint32(offset + index * 4, true);
     let a = a0;
     let b = b0;
     let c = c0;

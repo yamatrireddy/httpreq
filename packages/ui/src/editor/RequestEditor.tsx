@@ -64,23 +64,41 @@ function Count({ value }: { value: number }) {
   ) : null;
 }
 
-export function RequestEditor({ requestId, desktop, sending, onSend, onCancel, onSave, urlRef, buildCurl, shortcuts }: Props) {
+export function RequestEditor({
+  requestId,
+  desktop,
+  sending,
+  onSend,
+  onCancel,
+  onSave,
+  urlRef,
+  buildCurl,
+  shortcuts,
+}: Props) {
   const request = useWorkbenchStore((state) => editableRequest(state, requestId));
   const workspace = useWorkbenchStore((state) => state.workspace);
   const dirty = useWorkbenchStore((state) => !!state.drafts[requestId]);
   const saveStatus = useWorkbenchStore((state) => state.saveStatus[requestId]);
   const tab = useWorkbenchStore((state) => state.editorTabs[requestId] ?? 'params');
-  const lastRun = useWorkbenchStore((state) => state.history.find((entry) => entry.requestId === requestId));
+  const lastRun = useWorkbenchStore((state) =>
+    state.history.find((entry) => entry.requestId === requestId),
+  );
   const editRequest = useWorkbenchStore((state) => state.editRequest);
   const setEditorTab = useWorkbenchStore((state) => state.setEditorTab);
   const renameNode = useWorkbenchStore((state) => state.renameNode);
   const revealNode = useWorkbenchStore((state) => state.revealNode);
   const duplicateNode = useWorkbenchStore((state) => state.duplicateNode);
 
-  const onChange = useCallback((patch: Partial<HttpRequest>) => editRequest(requestId, patch), [editRequest, requestId]);
+  const onChange = useCallback(
+    (patch: Partial<HttpRequest>) => editRequest(requestId, patch),
+    [editRequest, requestId],
+  );
 
   const path = useMemo(() => getAncestors(workspace, requestId), [workspace, requestId]);
-  const effectiveAuth = useMemo(() => (request ? resolveEffectiveAuth(workspace, request) : null), [workspace, request]);
+  const effectiveAuth = useMemo(
+    () => (request ? resolveEffectiveAuth(workspace, request) : null),
+    [workspace, request],
+  );
   const inheritedAuth = useMemo(
     () => resolveInheritedAuth(workspace, request?.parentId ?? null),
     [workspace, request?.parentId],
@@ -96,7 +114,11 @@ export function RequestEditor({ requestId, desktop, sending, onSend, onCancel, o
       await navigator.clipboard.writeText(await buildCurl(request));
       notifications.show({ color: 'teal', message: 'cURL command copied to the clipboard.' });
     } catch (error) {
-      notifications.show({ color: 'red', title: 'Cannot build cURL', message: (error as Error).message });
+      notifications.show({
+        color: 'red',
+        title: 'Cannot build cURL',
+        message: (error as Error).message,
+      });
     }
   }, [buildCurl, request]);
 
@@ -147,7 +169,8 @@ export function RequestEditor({ requestId, desktop, sending, onSend, onCancel, o
             Params <Count value={paramCount} />
           </Tabs.Tab>
           <Tabs.Tab value="body">
-            Body {request.body.mode !== 'none' && <span className={classes.dot} aria-label="has body" />}
+            Body{' '}
+            {request.body.mode !== 'none' && <span className={classes.dot} aria-label="has body" />}
           </Tabs.Tab>
           <Tabs.Tab value="headers">
             Headers <Count value={headerCount} />
@@ -221,7 +244,9 @@ export function RequestEditor({ requestId, desktop, sending, onSend, onCancel, o
         <Tabs.Panel value="sharing" className={classes.panel}>
           <SharingPanel
             buildCurl={() => buildCurl(request)}
-            onExportRequest={() => downloadJson(fileNameFor(request.name, 'request'), exportRequest(workspace, request))}
+            onExportRequest={() =>
+              downloadJson(fileNameFor(request.name, 'request'), exportRequest(workspace, request))
+            }
             onExportCollection={
               collection
                 ? () => {

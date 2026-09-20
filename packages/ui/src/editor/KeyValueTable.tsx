@@ -1,4 +1,13 @@
-import { ActionIcon, Autocomplete, Button, Checkbox, Group, Text, Textarea, Tooltip } from '@mantine/core';
+import {
+  ActionIcon,
+  Autocomplete,
+  Button,
+  Checkbox,
+  Group,
+  Text,
+  Textarea,
+  Tooltip,
+} from '@mantine/core';
 import { IconCopy, IconLock, IconLockOpen, IconTrash } from '@tabler/icons-react';
 import { memo, useState, type ReactNode } from 'react';
 import { createId, type KeyValueItem } from '@httpreq/shared';
@@ -168,7 +177,9 @@ function KeyValueTableInner<T extends KeyValueItem>({
                     size="xs"
                     aria-label={`Enable ${item.key || 'row'}`}
                     checked={item.enabled}
-                    onChange={(event) => patch({ enabled: event.currentTarget.checked } as Partial<T>)}
+                    onChange={(event) =>
+                      patch({ enabled: event.currentTarget.checked } as Partial<T>)
+                    }
                   />
                 )}
               </span>
@@ -233,7 +244,11 @@ function KeyValueTableInner<T extends KeyValueItem>({
                     )}
                     {renderRowExtras?.(item, patch)}
                     {allowSecret && (
-                      <Tooltip label={item.secret ? 'Secret: masked and not saved to disk' : 'Mark as secret'}>
+                      <Tooltip
+                        label={
+                          item.secret ? 'Secret: masked and not saved to disk' : 'Mark as secret'
+                        }
+                      >
                         <ActionIcon
                           variant="subtle"
                           color={item.secret ? 'violet' : 'gray'}
@@ -247,12 +262,24 @@ function KeyValueTableInner<T extends KeyValueItem>({
                       </Tooltip>
                     )}
                     <Tooltip label="Duplicate">
-                      <ActionIcon variant="subtle" color="gray" size="sm" aria-label="Duplicate row" onClick={() => duplicate(item.id)}>
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        aria-label="Duplicate row"
+                        onClick={() => duplicate(item.id)}
+                      >
                         <IconCopy size={14} />
                       </ActionIcon>
                     </Tooltip>
                     <Tooltip label="Remove">
-                      <ActionIcon variant="subtle" color="gray" size="sm" aria-label="Remove row" onClick={() => remove(item.id)}>
+                      <ActionIcon
+                        variant="subtle"
+                        color="gray"
+                        size="sm"
+                        aria-label="Remove row"
+                        onClick={() => remove(item.id)}
+                      >
                         <IconTrash size={14} />
                       </ActionIcon>
                     </Tooltip>
