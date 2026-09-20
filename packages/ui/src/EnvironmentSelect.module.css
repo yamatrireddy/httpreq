@@ -1,0 +1,5 @@
+/* The tab strip stretches its children to the full bar height; the xs input keeps its own
+   height, so centre the root or the control sits against the top border. */
+.select {
+  align-self: center;
+}
