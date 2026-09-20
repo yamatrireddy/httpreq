@@ -1,5 +1,6 @@
 import { Alert, Button, Code, Group, Modal, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle, IconShieldQuestion } from '@tabler/icons-react';
+import { Z_LAYERS } from '../zLayers';
 import { useSsh } from './useSsh';
 import classes from './Ssh.module.css';
 
@@ -10,6 +11,9 @@ import classes from './Ssh.module.css';
  * that matters: it means the host is presenting a different identity than the one that was
  * trusted, which is what a man-in-the-middle looks like. Nothing is accepted automatically, and
  * the dialog cannot be dismissed by clicking away — the user has to choose.
+ *
+ * It is raised from inside another dialog, so it takes its own stacking layer and the focus with
+ * it; `yieldToHostKeyPrompt` is the other half of that arrangement.
  */
 export function HostKeyDialog() {
   const ssh = useSsh();
@@ -25,6 +29,9 @@ export function HostKeyDialog() {
       closeOnClickOutside={false}
       closeOnEscape={false}
       withCloseButton={false}
+      zIndex={Z_LAYERS.hostKey}
+      trapFocus
+      returnFocus
       centered
       size="lg"
     >
@@ -75,7 +82,8 @@ export function HostKeyDialog() {
           </Stack>
 
           <Group justify="flex-end" gap="xs">
-            <Button variant="default" onClick={() => ssh.answerHostKey('reject')}>
+            {/* The safe answer holds the initial focus, so Enter can never trust a host. */}
+            <Button variant="default" data-autofocus onClick={() => ssh.answerHostKey('reject')}>
               Cancel connection
             </Button>
             <Button color={changed ? 'red' : undefined} onClick={() => ssh.answerHostKey('trust')}>

@@ -20,6 +20,10 @@ import {
  * can never read from or write to another's shell. Every exit path — the user disconnecting, the
  * window closing, the app quitting — runs {@link Session.dispose}, so no orphan channel or socket
  * is left behind.
+ *
+ * A handshake takes seconds, and the user can disconnect or close the tab during it. Each attempt
+ * therefore carries a generation: one that is no longer current when the connection finally opens
+ * is torn down on the spot rather than registered as a session nothing in the UI knows about.
  */
 
 const sessionKey = (senderId: number, sessionId: string) => `${senderId}:${sessionId}`;
@@ -34,6 +38,8 @@ export type SessionEmitter = (senderId: number, sessionId: string, event: SshSes
 
 export class SshSessionManager {
   private readonly sessions = new Map<string, Session>();
+  /** Current connect attempt per session key; anything older has been abandoned. */
+  private readonly generations = new Map<string, number>();
 
   constructor(
     private readonly deps: ConnectionDeps,
@@ -55,6 +61,13 @@ export class SshSessionManager {
     return this.sessions.has(sessionKey(senderId, sessionId));
   }
 
+  /** Retires whatever is running or connecting under this key and returns the new attempt's id. */
+  private nextGeneration(key: string): number {
+    const generation = (this.generations.get(key) ?? 0) + 1;
+    this.generations.set(key, generation);
+    return generation;
+  }
+
   /** Opens a connection and an interactive shell. Reports progress through session events. */
   async connect(
     senderId: number,
@@ -64,6 +77,8 @@ export class SshSessionManager {
     const { sessionId, profile, size } = options;
     const key = sessionKey(senderId, sessionId);
     if (this.sessions.has(key)) await this.disconnect(senderId, sessionId);
+    const generation = this.nextGeneration(key);
+    const isCurrent = () => this.generations.get(key) === generation;
 
     const send = (event: SshSessionEvent) => this.emit(senderId, sessionId, event);
     send({ type: 'status', status: 'connecting' });
@@ -73,9 +88,19 @@ export class SshSessionManager {
       ({ client } = await openConnection(profile, this.deps, approveHostKey));
     } catch (error) {
       const info = toSshError(error);
-      send({ type: 'error', error: info });
-      send({ type: 'status', status: 'disconnected' });
+      if (isCurrent()) {
+        send({ type: 'error', error: info });
+        send({ type: 'status', status: 'disconnected' });
+      }
       throw info;
+    }
+
+    // Disconnected, or the window closed, while the handshake was still running.
+    if (!isCurrent()) {
+      client.removeAllListeners();
+      client.end();
+      client.destroy();
+      return;
     }
 
     // The session is registered before the shell opens, so a disconnect during `shell()` still
@@ -84,8 +109,15 @@ export class SshSessionManager {
       client,
       channel: null,
       dispose: () => {
-        session.channel?.removeAllListeners();
-        session.channel?.end();
+        const channel = session.channel;
+        if (channel) {
+          // `stderr` is a separate stream with its own listeners, and is missed by a
+          // `removeAllListeners` on the channel alone.
+          channel.stderr.removeAllListeners();
+          channel.removeAllListeners();
+          channel.end();
+          channel.destroy();
+        }
         client.removeAllListeners();
         client.end();
         client.destroy();
@@ -128,10 +160,12 @@ export class SshSessionManager {
       send({ type: 'status', status: 'connected' });
     } catch (error) {
       const info = toSshError(error);
-      this.sessions.delete(key);
+      if (this.sessions.get(key) === session) this.sessions.delete(key);
       session.dispose();
-      send({ type: 'error', error: info });
-      send({ type: 'status', status: 'disconnected' });
+      if (isCurrent()) {
+        send({ type: 'error', error: info });
+        send({ type: 'status', status: 'disconnected' });
+      }
       throw info;
     }
   }
@@ -158,6 +192,9 @@ export class SshSessionManager {
   async disconnect(senderId: number, sessionId: string): Promise<void> {
     const key = sessionKey(senderId, sessionId);
     const session = this.sessions.get(key);
+    // Retired even when nothing is registered yet, so a handshake still in flight is abandoned
+    // rather than becoming a session the user believes they have already closed.
+    this.nextGeneration(key);
     if (!session) return;
     this.sessions.delete(key);
     this.emit(senderId, sessionId, { type: 'status', status: 'disconnecting' });
@@ -167,14 +204,25 @@ export class SshSessionManager {
 
   /** Closes every session owned by one window; used when it navigates away or is destroyed. */
   disposeForSender(senderId: number): void {
+    const prefix = `${senderId}:`;
     for (const sessionId of this.list(senderId)) {
-      const session = this.sessions.get(sessionKey(senderId, sessionId));
-      this.sessions.delete(sessionKey(senderId, sessionId));
+      const key = sessionKey(senderId, sessionId);
+      const session = this.sessions.get(key);
+      this.sessions.delete(key);
       session?.dispose();
+    }
+    // Invalidates any handshake still running for this window, and drops its counters with it.
+    for (const key of [...this.generations.keys()]) {
+      if (key.startsWith(prefix)) {
+        this.nextGeneration(key);
+        this.generations.delete(key);
+      }
     }
   }
 
   disposeAll(): void {
+    for (const key of [...this.generations.keys()]) this.nextGeneration(key);
+    this.generations.clear();
     for (const session of this.sessions.values()) session.dispose();
     this.sessions.clear();
   }

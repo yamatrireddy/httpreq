@@ -22,6 +22,7 @@ import {
 } from '@httpreq/shared';
 import { VariableInput } from '../editor/VariableInput';
 import { useWorkbenchStore } from '../store';
+import { yieldToHostKeyPrompt } from './hostKeyPrompt';
 import { useSsh } from './useSsh';
 
 const AUTH_OPTIONS: { value: SshAuthType; label: string }[] = [
@@ -129,7 +130,15 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
   const needsKey = draft.authType !== 'password';
 
   return (
-    <Modal opened onClose={onClose} title="SSH connection" size="lg" centered>
+    <Modal
+      opened
+      onClose={onClose}
+      title="SSH connection"
+      size="lg"
+      centered
+      // "Test connection" can raise the host-key question, which has to be answered first.
+      {...yieldToHostKeyPrompt(!!ssh.pendingHostKey)}
+    >
       <Stack gap="sm">
         <TextInput
           label="Profile name"

@@ -15,8 +15,8 @@ import classes from './TitleBar.module.css';
 
 interface Props {
   title: string;
-  /** Rendered between the menu bar and the window title, e.g. the workspace switcher. */
-  leading?: ReactNode;
+  /** Centred in the bar, independently of what sits on either side: the workspace switcher. */
+  center?: ReactNode;
   menus: MenuDefinition[];
   commands: CommandMap;
   mac: boolean;
@@ -39,10 +39,15 @@ const toHex = (color: string) => {
  * Integrated title bar. In Electron it is the window's drag region, hosts the application menu
  * on Windows and Linux (macOS keeps its native global menu), and leaves room for the native
  * window controls: the traffic lights on macOS, the window-controls overlay elsewhere.
+ *
+ * The bar is three zones. The outer two share the leftover space equally, which keeps the middle
+ * one centred in the window at any width without taking it out of the flow — so it can never
+ * overlap the menu, the window controls or the traffic lights, and simply gives up width (and
+ * truncates) when the sides need it.
  */
 export function TitleBar({
   title,
-  leading,
+  center,
   menus,
   commands,
   mac,
@@ -85,75 +90,83 @@ export function TitleBar({
       data-mac={mac || undefined}
       data-fullscreen={windowState.fullscreen || undefined}
     >
-      {desktop && mac && !windowState.fullscreen && <div className={classes.trafficLights} />}
-      <Burger
-        opened={mobileNavOpened}
-        onClick={onToggleMobileNav}
-        hiddenFrom="sm"
-        size="xs"
-        className={classes.noDrag}
-        aria-label={mobileNavOpened ? 'Close navigation' : 'Open navigation'}
-      />
-      <div className={classes.brand}>
-        <AppLogo size={18} />
-        {(mac || !desktop) && <span className={classes.appName}>HttpReq</span>}
-      </div>
-      {!mac && <MenuBar menus={menus} commands={commands} mac={mac} altKeyNavigation={!!desktop} />}
-      {leading}
-      <div className={classes.title} title={title}>
-        {title}
-      </div>
-      <div className={classes.actions}>
-        {toggleSidebar && (
-          <Tooltip label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}>
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="md"
-              radius={0}
-              visibleFrom="sm"
-              aria-label="Toggle sidebar"
-              aria-pressed={sidebarVisible}
-              onClick={toggleSidebar.run}
-            >
-              {sidebarVisible ? (
-                <IconLayoutSidebarLeftCollapse size={17} />
-              ) : (
-                <IconLayoutSidebarLeftExpand size={17} />
-              )}
-            </ActionIcon>
-          </Tooltip>
+      <div className={`${classes.side} ${classes.sideStart}`}>
+        {desktop && mac && !windowState.fullscreen && <div className={classes.trafficLights} />}
+        <Burger
+          opened={mobileNavOpened}
+          onClick={onToggleMobileNav}
+          hiddenFrom="sm"
+          size="xs"
+          className={classes.noDrag}
+          aria-label={mobileNavOpened ? 'Close navigation' : 'Open navigation'}
+        />
+        <div className={classes.brand}>
+          <AppLogo size={18} />
+          {(mac || !desktop) && <span className={classes.appName}>HttpReq</span>}
+        </div>
+        {!mac && (
+          <MenuBar menus={menus} commands={commands} mac={mac} altKeyNavigation={!!desktop} />
         )}
-        {toggleTheme && (
-          <Tooltip label="Toggle color scheme">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="md"
-              radius={0}
-              aria-label="Toggle color scheme"
-              onClick={toggleTheme.run}
-            >
-              {colorScheme === 'dark' ? <IconSun size={17} /> : <IconMoon size={17} />}
-            </ActionIcon>
-          </Tooltip>
-        )}
-        {settings && (
-          <Tooltip label="Settings">
-            <ActionIcon
-              variant="subtle"
-              color="gray"
-              size="md"
-              radius={0}
-              aria-label="Settings"
-              onClick={settings.run}
-            >
-              <IconSettings size={17} />
-            </ActionIcon>
-          </Tooltip>
-        )}
+        <div className={classes.title} title={title}>
+          {title}
+        </div>
       </div>
-      {desktop && !mac && <div className={classes.windowControls} />}
+
+      {center && <div className={classes.center}>{center}</div>}
+
+      <div className={`${classes.side} ${classes.sideEnd}`}>
+        <div className={classes.actions}>
+          {toggleSidebar && (
+            <Tooltip label={sidebarVisible ? 'Hide sidebar' : 'Show sidebar'}>
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="md"
+                radius={0}
+                visibleFrom="sm"
+                aria-label="Toggle sidebar"
+                aria-pressed={sidebarVisible}
+                onClick={toggleSidebar.run}
+              >
+                {sidebarVisible ? (
+                  <IconLayoutSidebarLeftCollapse size={17} />
+                ) : (
+                  <IconLayoutSidebarLeftExpand size={17} />
+                )}
+              </ActionIcon>
+            </Tooltip>
+          )}
+          {toggleTheme && (
+            <Tooltip label="Toggle color scheme">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="md"
+                radius={0}
+                aria-label="Toggle color scheme"
+                onClick={toggleTheme.run}
+              >
+                {colorScheme === 'dark' ? <IconSun size={17} /> : <IconMoon size={17} />}
+              </ActionIcon>
+            </Tooltip>
+          )}
+          {settings && (
+            <Tooltip label="Settings">
+              <ActionIcon
+                variant="subtle"
+                color="gray"
+                size="md"
+                radius={0}
+                aria-label="Settings"
+                onClick={settings.run}
+              >
+                <IconSettings size={17} />
+              </ActionIcon>
+            </Tooltip>
+          )}
+        </div>
+        {desktop && !mac && <div className={classes.windowControls} />}
+      </div>
     </div>
   );
 }
