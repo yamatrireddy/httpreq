@@ -1,10 +1,4 @@
-import type {
-  ApiKeyAuth,
-  BasicAuth,
-  BearerAuth,
-  InheritAuth,
-  NoAuth,
-} from '@httpreq/shared';
+import type { ApiKeyAuth, BasicAuth, BearerAuth, InheritAuth, NoAuth } from '@httpreq/shared';
 import { bytesToBase64, utf8 } from '../crypto';
 import { defineProvider } from './define';
 import type { AuthIssue } from './types';

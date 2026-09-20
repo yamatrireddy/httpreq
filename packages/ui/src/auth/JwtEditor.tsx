@@ -1,4 +1,14 @@
-import { Button, Checkbox, Group, NumberInput, Select, SimpleGrid, Stack, Text, Textarea } from '@mantine/core';
+import {
+  Button,
+  Checkbox,
+  Group,
+  NumberInput,
+  Select,
+  SimpleGrid,
+  Stack,
+  Text,
+  Textarea,
+} from '@mantine/core';
 import { IconEye, IconEyeOff } from '@tabler/icons-react';
 import { useState } from 'react';
 import { isHmacAlgorithm, jwtAuthProvider } from '@httpreq/api-client';
@@ -11,7 +21,8 @@ export function JwtEditor({ config, onChange }: AuthEditorProps<JwtAuth>) {
   const hmac = isHmacAlgorithm(config.algorithm);
   const [showKey, setShowKey] = useState(false);
   const issues = jwtAuthProvider.validate(config);
-  const issue = (field: string) => issues.find((item) => item.field === field && item.severity === 'error')?.message;
+  const issue = (field: string) =>
+    issues.find((item) => item.field === field && item.severity === 'error')?.message;
 
   return (
     <Stack gap="sm">
@@ -79,8 +90,8 @@ export function JwtEditor({ config, onChange }: AuthEditorProps<JwtAuth>) {
             />
           ) : (
             <Text size="xs" c="dimmed">
-              {config.secret ? 'A private key is set (hidden).' : 'No private key yet.'} It is used only to
-              sign each request and is not saved to disk as a literal value.
+              {config.secret ? 'A private key is set (hidden).' : 'No private key yet.'} It is used
+              only to sign each request and is not saved to disk as a literal value.
             </Text>
           )}
         </Stack>
@@ -88,8 +99,16 @@ export function JwtEditor({ config, onChange }: AuthEditorProps<JwtAuth>) {
 
       <SimpleGrid cols={{ base: 1, xs: 3 }} spacing="sm">
         <Field label="Issuer (iss)" value={config.issuer} onChange={(issuer) => set({ issuer })} />
-        <Field label="Subject (sub)" value={config.subject} onChange={(subject) => set({ subject })} />
-        <Field label="Audience (aud)" value={config.audience} onChange={(audience) => set({ audience })} />
+        <Field
+          label="Subject (sub)"
+          value={config.subject}
+          onChange={(subject) => set({ subject })}
+        />
+        <Field
+          label="Audience (aud)"
+          value={config.audience}
+          onChange={(audience) => set({ audience })}
+        />
       </SimpleGrid>
 
       <Textarea
@@ -106,7 +125,7 @@ export function JwtEditor({ config, onChange }: AuthEditorProps<JwtAuth>) {
       />
       <Textarea
         label="Extra header fields"
-        description="Optional JSON object, e.g. {&quot;kid&quot;: &quot;key-1&quot;}. alg and typ are set automatically."
+        description='Optional JSON object, e.g. {"kid": "key-1"}. alg and typ are set automatically.'
         value={config.header}
         onChange={(event) => set({ header: event.currentTarget.value })}
         error={issue('header')}

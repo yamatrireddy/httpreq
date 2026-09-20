@@ -3,6 +3,9 @@
  * display data only, so renaming or moving never breaks tabs, history or inheritance.
  */
 
+import type { WebSocketRequest } from './websocket';
+import type { SshProfile, TunnelProfile } from './ssh';
+
 export const HTTP_METHODS = ['GET', 'POST', 'PUT', 'PATCH', 'DELETE', 'HEAD', 'OPTIONS'] as const;
 export type HttpMethod = (typeof HTTP_METHODS)[number];
 
@@ -141,14 +144,7 @@ export type OAuth2Auth = {
 };
 
 export type AuthConfig =
-  | NoAuth
-  | InheritAuth
-  | ApiKeyAuth
-  | BearerAuth
-  | BasicAuth
-  | DigestAuth
-  | JwtAuth
-  | OAuth2Auth;
+  NoAuth | InheritAuth | ApiKeyAuth | BearerAuth | BasicAuth | DigestAuth | JwtAuth | OAuth2Auth;
 
 export type AuthType = AuthConfig['type'];
 
@@ -218,8 +214,13 @@ export interface Environment {
   variables: EnvironmentVariable[];
 }
 
-export const WORKSPACE_VERSION = 2;
+/** 3 added WebSocket requests and the desktop connection profiles. */
+export const WORKSPACE_VERSION = 3;
 
+/**
+ * The top-level container for everything a user works on. Workspaces are fully isolated: nothing
+ * outside this object belongs to a workspace, so switching one out reloads every panel at once.
+ */
 export interface Workspace {
   version: typeof WORKSPACE_VERSION;
   id: string;
@@ -228,14 +229,35 @@ export interface Workspace {
   collections: Collection[];
   folders: Folder[];
   requests: HttpRequest[];
+  /** WebSocket requests live in the same tree, addressed by the same `parentId`. */
+  websocketRequests: WebSocketRequest[];
   environments: Environment[];
   activeEnvironmentId: string | null;
-  /** Request ids open as editor tabs, in tab order. */
+  /** Desktop only; ignored by the browser build, but kept so data survives a round trip. */
+  sshProfiles: SshProfile[];
+  tunnelProfiles: TunnelProfile[];
+  /** Ids of open editor tabs (HTTP or WebSocket requests), in tab order. */
   openRequestIds: string[];
   updatedAt: string;
 }
 
-export type TreeNodeKind = 'collection' | 'folder' | 'request';
+/** Workspace identity without its contents, for the switcher and the workspace index. */
+export interface WorkspaceMeta {
+  id: string;
+  name: string;
+  updatedAt: string;
+}
+
+export const workspaceMeta = (workspace: Workspace): WorkspaceMeta => ({
+  id: workspace.id,
+  name: workspace.name,
+  updatedAt: workspace.updatedAt,
+});
+
+export type TreeNodeKind = 'collection' | 'folder' | 'request' | 'websocket';
+
+/** Tree nodes that open in a tab. */
+export type RequestKind = 'request' | 'websocket';
 
 export interface HistoryEntry {
   id: string;

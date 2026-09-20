@@ -34,13 +34,19 @@ describe('variables', () => {
 
   it('describes variables with their source without exposing dynamic values', () => {
     const resolver = createVariableResolver(environment);
-    expect(resolver.lookup('token')).toMatchObject({ value: 'secret', secret: true, source: 'Dev' });
+    expect(resolver.lookup('token')).toMatchObject({
+      value: 'secret',
+      secret: true,
+      source: 'Dev',
+    });
     expect(resolver.lookup('$guid')).toMatchObject({ dynamic: true, source: 'Dynamic' });
     expect(resolver.resolve('{{$guid}}')).toMatch(/^[0-9a-f-]{36}$/);
   });
 
   it('can keep secrets as references', () => {
-    expect(createVariableResolver(environment, { keepSecrets: true }).resolve('{{token}}')).toBe('{{token}}');
+    expect(createVariableResolver(environment, { keepSecrets: true }).resolve('{{token}}')).toBe(
+      '{{token}}',
+    );
   });
 
   it('detects template-only values', () => {

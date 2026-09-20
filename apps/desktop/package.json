@@ -21,6 +21,12 @@
     "@httpreq/api-client": "*",
     "@httpreq/shared": "*",
     "electron": "^44.4.3",
-    "electron-builder": "^26.15.3"
+    "electron-builder": "^26.15.3",
+    "@types/ssh2": "^1.15.5",
+    "@types/ws": "^8.18.1"
+  },
+  "dependencies": {
+    "ssh2": "^1.17.0",
+    "ws": "^8.18.3"
   }
 }

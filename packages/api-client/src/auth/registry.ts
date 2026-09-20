@@ -1,5 +1,5 @@
 import type { AuthConfig, AuthType, HttpRequest, Workspace } from '@httpreq/shared';
-import { findNode, getAncestors } from '@httpreq/workspace';
+import { findNode, getAncestors, isLeafNode } from '@httpreq/workspace';
 import {
   apiKeyAuthProvider,
   basicAuthProvider,
@@ -34,7 +34,8 @@ export const getAuthProvider = <C extends AuthConfig>(config: C): AuthProvider<C
 export const createAuth = (type: AuthType): AuthConfig => authProviders[type].create();
 
 /** Auth data safe to persist (literal secrets removed). */
-export const serializeAuth = (config: AuthConfig): AuthConfig => getAuthProvider(config).serialize(config);
+export const serializeAuth = (config: AuthConfig): AuthConfig =>
+  getAuthProvider(config).serialize(config);
 
 /** Validates untrusted auth data; unknown schemes return `null`. */
 export const deserializeAuth = (value: unknown): AuthConfig | null => {
@@ -64,11 +65,14 @@ export interface EffectiveAuth {
  * The configuration inherited by children of `parentId`: the nearest folder or collection, walking
  * up the tree, whose authorization is anything other than "Inherit from Parent".
  */
-export const resolveInheritedAuth = (workspace: Workspace, parentId: string | null): EffectiveAuth => {
+export const resolveInheritedAuth = (
+  workspace: Workspace,
+  parentId: string | null,
+): EffectiveAuth => {
   if (parentId) {
     const containers = [...getAncestors(workspace, parentId)];
     const parent = findNode(workspace, parentId);
-    if (parent && parent.kind !== 'request') containers.push(parent);
+    if (parent && !isLeafNode(parent)) containers.push(parent);
     for (const container of containers.reverse()) {
       if (container.node.auth.type !== 'inherit') {
         return {

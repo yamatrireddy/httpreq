@@ -4,7 +4,13 @@ import { fireEvent, render, screen, within } from '@testing-library/react';
 import type { ReactNode } from 'react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
 import { createVariableResolver } from '@httpreq/api-client';
-import { createCollection, createFolder, createKeyValue, type AuthConfig, type KeyValueItem } from '@httpreq/shared';
+import {
+  createCollection,
+  createFolder,
+  createKeyValue,
+  type AuthConfig,
+  type KeyValueItem,
+} from '@httpreq/shared';
 import type { ContainerNode } from '@httpreq/workspace';
 import { AuthorizationPanel } from '../auth/AuthorizationPanel';
 import { VariableContext } from '../variableContext';
@@ -23,13 +29,17 @@ beforeAll(() => {
 const resolver = createVariableResolver({
   id: 'e',
   name: 'Development',
-  variables: [{ id: 'v', key: 'base_url', value: 'https://api.example.com', enabled: true, secret: false }],
+  variables: [
+    { id: 'v', key: 'base_url', value: 'https://api.example.com', enabled: true, secret: false },
+  ],
 });
 
 const wrap = (children: ReactNode) =>
   render(
     <MantineProvider>
-      <VariableContext.Provider value={{ resolver, environmentName: 'Development' }}>{children}</VariableContext.Provider>
+      <VariableContext.Provider value={{ resolver, environmentName: 'Development' }}>
+        {children}
+      </VariableContext.Provider>
     </MantineProvider>,
   );
 
@@ -38,7 +48,9 @@ describe('KeyValueTable', () => {
     const onChange = vi.fn();
     wrap(<KeyValueTable label="Headers" items={[]} onChange={onChange} />);
     fireEvent.change(screen.getAllByLabelText('Key')[0]!, { target: { value: 'Accept' } });
-    expect(onChange).toHaveBeenCalledWith([expect.objectContaining({ key: 'Accept', value: '', enabled: true })]);
+    expect(onChange).toHaveBeenCalledWith([
+      expect.objectContaining({ key: 'Accept', value: '', enabled: true }),
+    ]);
   });
 
   it('counts only enabled rows with a key', () => {
@@ -78,10 +90,12 @@ describe('VariableInput', () => {
       <VariableInput aria-label="URL" value="{{base_url}}/users/{{id}}" onChange={vi.fn()} />,
     );
     const spans = container.querySelectorAll('[data-variable]');
-    expect([...spans].map((span) => [span.textContent, span.getAttribute('data-defined')])).toEqual([
-      ['{{base_url}}', 'true'],
-      ['{{id}}', 'false'],
-    ]);
+    expect([...spans].map((span) => [span.textContent, span.getAttribute('data-defined')])).toEqual(
+      [
+        ['{{base_url}}', 'true'],
+        ['{{id}}', 'false'],
+      ],
+    );
     expect(screen.getByLabelText('URL')).toHaveValue('{{base_url}}/users/{{id}}');
   });
 });
@@ -128,7 +142,13 @@ describe('AuthorizationPanel', () => {
   it('shows where inherited authorization comes from and can override it', () => {
     const onChange = vi.fn();
     wrap(
-      <AuthorizationPanel auth={{ type: 'inherit' }} onChange={onChange} inherited={inherited} canInherit owner="request" />,
+      <AuthorizationPanel
+        auth={{ type: 'inherit' }}
+        onChange={onChange}
+        inherited={inherited}
+        canInherit
+        owner="request"
+      />,
     );
     expect(screen.getByText('HIMS One Account Service')).toBeInTheDocument();
     expect(screen.getByText('Type').parentElement).toHaveTextContent('Bearer Token');
@@ -138,7 +158,15 @@ describe('AuthorizationPanel', () => {
   });
 
   it('shows an empty state for No Auth', () => {
-    wrap(<AuthorizationPanel auth={{ type: 'none' }} onChange={vi.fn()} inherited={inherited} canInherit owner="request" />);
+    wrap(
+      <AuthorizationPanel
+        auth={{ type: 'none' }}
+        onChange={vi.fn()}
+        inherited={inherited}
+        canInherit
+        owner="request"
+      />,
+    );
     expect(screen.getByText('No authorization selected')).toBeInTheDocument();
   });
 

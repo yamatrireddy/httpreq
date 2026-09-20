@@ -28,7 +28,10 @@ export function useRequestExecution() {
   }, []);
 
   const send = useCallback(
-    async <T,>(requestId: string, run: (signal: AbortSignal) => Promise<T>): Promise<ExecutionOutcome<T>> => {
+    async <T>(
+      requestId: string,
+      run: (signal: AbortSignal) => Promise<T>,
+    ): Promise<ExecutionOutcome<T>> => {
       controllers.current.get(requestId)?.abort();
       const controller = new AbortController();
       controllers.current.set(requestId, controller);

@@ -1,5 +1,6 @@
-// Packages the desktop app. Main and preload are fully bundled by Vite, so the app needs no
-// node_modules at runtime; the web renderer build is shipped as an extra resource.
+// Packages the desktop app. Main and preload are bundled by Vite except for ssh2 and ws, which
+// stay external (they load optional native bindings at runtime) and are collected by
+// electron-builder from the production dependencies; the web renderer build ships as a resource.
 // Build first (`npm run build` at the repository root), then `npm run package:desktop`.
 
 /** Electron is hoisted to the workspace root, so read the exact installed version from there. */

@@ -27,7 +27,9 @@ export function ApiKeyEditor({ config, onChange }: AuthEditorProps<ApiKeyAuth>) 
           { value: 'header', label: 'Header' },
           { value: 'query', label: 'Query Parameter' },
         ]}
-        onChange={(location) => location && onChange({ ...config, location: location as ApiKeyAuth['location'] })}
+        onChange={(location) =>
+          location && onChange({ ...config, location: location as ApiKeyAuth['location'] })
+        }
         comboboxProps={{ withinPortal: true }}
       />
     </Stack>
@@ -56,7 +58,10 @@ export function BearerEditor({ config, onChange }: AuthEditorProps<BearerAuth>) 
   );
 }
 
-export function BasicEditor<C extends BasicAuth | DigestAuth>({ config, onChange }: AuthEditorProps<C>) {
+export function BasicEditor<C extends BasicAuth | DigestAuth>({
+  config,
+  onChange,
+}: AuthEditorProps<C>) {
   return (
     <Stack gap="sm">
       <SimpleGrid cols={{ base: 1, xs: 2 }} spacing="sm">
@@ -77,8 +82,8 @@ export function BasicEditor<C extends BasicAuth | DigestAuth>({ config, onChange
       {config.type === 'digest' && (
         <Text size="xs" c="dimmed">
           The first request is sent without credentials; HttpReq answers the server’s 401 Digest
-          challenge once. In the browser this requires the server to expose the
-          WWW-Authenticate header to scripts (CORS); the desktop app always can.
+          challenge once. In the browser this requires the server to expose the WWW-Authenticate
+          header to scripts (CORS); the desktop app always can.
         </Text>
       )}
     </Stack>

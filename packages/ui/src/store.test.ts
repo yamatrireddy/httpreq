@@ -54,7 +54,10 @@ describe('workbench store', () => {
     state().editRequest(id!, { method: 'POST' });
     const draft = state().drafts[id!]!;
     const base = state().workspace;
-    const written = { ...base, requests: base.requests.map((request) => (request.id === id ? draft : request)) };
+    const written = {
+      ...base,
+      requests: base.requests.map((request) => (request.id === id ? draft : request)),
+    };
     state().setSaveStatus(id!, 'saving');
     state().commitSaved(draft, draft, written, base);
     expect(state().workspace).toBe(written);
@@ -139,7 +142,9 @@ describe('workbench store', () => {
 
   it('stores retrieved tokens in the active environment as secrets', () => {
     expect(state().setEnvironmentVariable('accessToken', 'tok', true)).toBe(true);
-    const variable = state().workspace.environments[0]!.variables.find((item) => item.key === 'accessToken');
+    const variable = state().workspace.environments[0]!.variables.find(
+      (item) => item.key === 'accessToken',
+    );
     expect(variable).toMatchObject({ value: 'tok', secret: true, enabled: true });
     state().setActiveEnvironment(null);
     expect(state().setEnvironmentVariable('accessToken', 'x', true)).toBe(false);

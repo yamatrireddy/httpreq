@@ -1,6 +1,11 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
 import { BrowserHttpRuntime, ElectronHttpRuntime } from './index';
-import { AppError, type HttpReqBridge, type HttpResponse, type PreparedRequest } from '@httpreq/shared';
+import {
+  AppError,
+  type HttpReqBridge,
+  type HttpResponse,
+  type PreparedRequest,
+} from '@httpreq/shared';
 
 const request: PreparedRequest = {
   method: 'POST',

@@ -19,7 +19,9 @@ type Definition<C extends AuthConfig> = Omit<
  * the secret itself then lives in the environment), and deserialization type-checks each field
  * against the defaults from `create()`.
  */
-export const defineProvider = <C extends AuthConfig>(definition: Definition<C>): AuthProvider<C> => {
+export const defineProvider = <C extends AuthConfig>(
+  definition: Definition<C>,
+): AuthProvider<C> => {
   const { enums = {}, literalFields = [], ...provider } = definition;
   const literal = new Set<string>(['type', ...literalFields, ...Object.keys(enums)]);
   const enumValues = enums as Record<string, readonly unknown[] | undefined>;

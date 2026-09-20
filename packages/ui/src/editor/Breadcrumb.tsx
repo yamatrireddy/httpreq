@@ -43,7 +43,11 @@ export function Breadcrumb({ path, name, onSelect, onRename }: Props) {
   const crumb = (item: ContainerNode) => (
     <Tooltip label={`Show “${item.node.name}” in the explorer`} key={item.node.id}>
       <UnstyledButton className={classes.crumb} onClick={() => onSelect(item.node.id)}>
-        {item.kind === 'collection' ? <IconBox size={13} aria-hidden /> : <IconFolder size={13} aria-hidden />}
+        {item.kind === 'collection' ? (
+          <IconBox size={13} aria-hidden />
+        ) : (
+          <IconFolder size={13} aria-hidden />
+        )}
         <span className={classes.crumbText}>{item.node.name}</span>
       </UnstyledButton>
     </Tooltip>
@@ -66,7 +70,10 @@ export function Breadcrumb({ path, name, onSelect, onRename }: Props) {
             <>
               <Menu position="bottom-start" withinPortal shadow="md">
                 <Menu.Target>
-                  <UnstyledButton className={classes.crumb} aria-label={`${hidden.length} more folders`}>
+                  <UnstyledButton
+                    className={classes.crumb}
+                    aria-label={`${hidden.length} more folders`}
+                  >
                     …
                   </UnstyledButton>
                 </Menu.Target>
@@ -105,7 +112,11 @@ export function Breadcrumb({ path, name, onSelect, onRename }: Props) {
           className={classes.nameInput}
         />
       ) : (
-        <span className={classes.current} aria-current="page" onDoubleClick={() => setEditing(true)}>
+        <span
+          className={classes.current}
+          aria-current="page"
+          onDoubleClick={() => setEditing(true)}
+        >
           <span className={classes.crumbText}>{name}</span>
           <Tooltip label="Rename (F2 in the explorer)">
             <ActionIcon

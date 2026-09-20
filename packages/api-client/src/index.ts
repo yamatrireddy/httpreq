@@ -12,6 +12,7 @@ export * from './curl';
 export * from './pipeline';
 export * from './transport';
 export * from './variables';
+export * from './websocket';
 
 export class BrowserHttpRuntime implements HttpRuntime {
   readonly kind = 'browser' as const;
@@ -24,7 +25,8 @@ export class BrowserHttpRuntime implements HttpRuntime {
     } catch (cause) {
       if (
         cause instanceof AppError ||
-        (cause instanceof DOMException && (cause.name === 'AbortError' || cause.name === 'TimeoutError'))
+        (cause instanceof DOMException &&
+          (cause.name === 'AbortError' || cause.name === 'TimeoutError'))
       )
         throw cause;
       throw new AppError(

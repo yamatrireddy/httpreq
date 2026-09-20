@@ -1,6 +1,19 @@
 # HttpReq
 
-HttpReq is a local-first API testing application with one React interface for the web and Electron. This repository implements the product foundation and the first REST-client slice: multiple request tabs, GET/POST/PUT/PATCH/DELETE, query parameters, headers, JSON bodies, Basic/Bearer/API-key authentication, cancellation in the browser runtime, and a formatted response viewer.
+HttpReq is a local-first developer networking toolkit with one React interface for the web and Electron: an HTTP/REST client, a WebSocket client, and — on the desktop — an SSH terminal and SSH port forwarding, all organised into isolated workspaces.
+
+## Platform support
+
+| Feature                          | Web | Electron desktop |
+| -------------------------------- | --- | ---------------- |
+| Workspaces                       | Yes | Yes              |
+| HTTP / REST                      | Yes | Yes              |
+| WebSocket client                 | Yes | Yes              |
+| WebSocket handshake headers      | No  | Yes              |
+| SSH client                       | No  | Yes              |
+| SSH tunnelling / port forwarding | No  | Yes              |
+
+SSH and tunnelling are desktop-only because they need native sockets, private-key files on disk, and an OS credential vault. The browser build does not merely hide the buttons: there is no bridge to call, and the Electron main process re-validates every request on its own side.
 
 ## Project structure
 
@@ -10,11 +23,14 @@ apps/
   desktop/         Hardened Electron main process and preload bridge
 packages/
   ui/              Mantine workbench, theme, and Zustand state
-  api-client/      Request preparation and browser/Electron adapters
-  workspace/       Workspace model helpers and validation
-  storage/         Local WorkspaceRepository implementation
-  shared/          Runtime contracts, domain models, and errors
+  api-client/      HTTP and WebSocket preparation, browser/Electron adapters
+  workspace/       Workspace model helpers, migration, and tree operations
+  storage/         Key/value store abstraction and the workspace repositories
+  shared/          Runtime contracts, domain models, validation, and errors
 ```
+
+The desktop-only code lives in `apps/desktop/src`: `websocket.ts` (sockets that can set handshake
+headers) and `ssh/` (connections, credential vault, known hosts, terminal sessions, tunnels).
 
 See [docs/architecture.md](docs/architecture.md) for boundaries and security decisions.
 
@@ -50,6 +66,56 @@ npm run package:desktop
 
 Output goes to `apps/desktop/release/`. The app icon master is `apps/desktop/build/icon.svg`; after editing it, regenerate the `.ico`, `.icns`, Linux PNG set, runtime window icon and web favicon with `npm run icons --workspace=@httpreq/desktop`.
 
+## Workspaces
+
+A workspace is the top-level container for collections, folders, HTTP and WebSocket requests,
+environments and — on the desktop — SSH and tunnel profiles. The switcher sits in the title bar and
+can create, rename, duplicate, delete and switch workspaces; the last one used is restored on the
+next start.
+
+Workspaces are fully isolated: only one is in memory at a time, and switching reloads every panel
+rather than filtering a shared list. Because a switch tears down the live connections the outgoing
+workspace owns, anything running is named in a confirmation first.
+
+Duplicating a workspace rewrites every identifier, so the copy shares nothing with the original.
+Stored SSH passwords and passphrases are deliberately **not** copied — the copy's connections need
+their credentials entered again.
+
+Browser data is stored in IndexedDB (falling back to `localStorage`, then to memory when site data
+is blocked); data written by earlier releases is migrated on first run.
+
+## WebSocket client
+
+A WebSocket request lives in the collection tree beside HTTP requests and opens in the same tab
+strip, marked `WS`. It supports URL and query parameters, handshake headers, subprotocols, the same
+authorization schemes and `{{variables}}` as HTTP, connect/disconnect/reconnect with optional
+automatic reconnection, and text, JSON, XML and binary (hexadecimal) payloads. Every frame is
+logged with its direction (`↑` sent, `↓` received), timestamp, payload type and size.
+
+Browsers cannot set handshake headers, so the browser build warns and skips them; the desktop build
+opens the socket in the main process and sends them.
+
+## SSH and tunnels (desktop)
+
+The **SSH** sidebar view holds reusable connection profiles: host, port, username and password,
+private key, or private key plus passphrase. Keys are chosen with the native file picker and stay
+where they are — the profile stores only the path. Passwords and passphrases go straight into the
+OS credential vault (Windows Credential Manager, macOS Keychain, Linux Secret Service) through
+Electron's `safeStorage`; they are never written to workspace data, never returned to the renderer,
+and never logged. If the system offers no encryption, HttpReq refuses to store the secret rather
+than falling back to plain text.
+
+Connecting opens an xterm.js terminal in its own tab, with scrollback, copy and paste
+(Ctrl/Cmd+Shift+C and Ctrl/Cmd+Shift+V, so Ctrl+C still reaches the remote shell as an interrupt)
+and resize. Host keys are verified: an unknown host shows its `SHA256:` fingerprint and asks, and a
+fingerprint that has _changed_ raises a prominent warning and is never accepted silently.
+
+The **Tunnels** view configures local port forwarding (`ssh -L`). The local bind address defaults to
+`127.0.0.1`, and choosing anything else warns that the forwarded service becomes reachable from the
+network. Port conflicts are detected before a tunnel starts. Remote (`-R`) and dynamic SOCKS (`-D`)
+forwarding are in the model and the UI but are not implemented yet; a profile saved with one of them
+refuses to start rather than doing something else.
+
 ## Workspace and keyboard
 
 - The response panel sits to the **right** of or **below** the request (View menu, the layout toggle at the end of the tab strip, or the status bar). Drag the splitter to resize, double-click it or press Enter on it to reset. Layout, split sizes, sidebar and status bar visibility are application-wide preferences stored under `httpreq.preferences`, separate from workspace data.
@@ -62,6 +128,7 @@ Output goes to `apps/desktop/release/`. The app icon master is `apps/desktop/bui
 | Send and focus response   | Ctrl+Shift+Enter                                     | ⇧⌘↩             |
 | Save                      | Ctrl+S                                               | ⌘S              |
 | New / close request       | Ctrl+T / Ctrl+W                                      | ⌘T / ⌘W         |
+| New WebSocket request     | Ctrl+Shift+T                                         | ⇧⌘T             |
 | Next / previous request   | Ctrl+Tab / Ctrl+Shift+Tab (or Ctrl+PgDn / Ctrl+PgUp) | ⌃⇥ / ⌃⇧⇥        |
 | Go to request 1–9         | Ctrl+1 … Ctrl+9                                      | ⌘1 … ⌘9         |
 | Toggle sidebar / settings | Ctrl+B / Ctrl+,                                      | ⌘B / ⌘,         |
@@ -81,13 +148,16 @@ npm run format:check
 
 ## Current limitations
 
-- Only `none` and JSON request bodies are implemented; XML, text, forms, multipart, and binary are next-scope features.
-- OAuth 2.0 is not implemented yet.
 - Browser requests must satisfy CORS. Electron uses native networking and is not CORS-constrained.
 - Each request tab can send and cancel independently; cancellation aborts the underlying request in both the browser and Electron runtimes.
-- Workspaces are stored in browser local storage. Authentication secret values remain in memory for the session and are deliberately removed before persistence.
-- Collections, environment interpolation, history, import/export, WebSockets, and desktop connectivity tools are extension points, not implemented features.
+- Authentication secret values remain in memory for the session and are deliberately removed before persistence. SSH secrets are the exception: they live in the OS credential vault.
+- WebSocket requests are committed to the workspace as they are edited (like environments), so they have no separate save step and never show an unsaved marker.
+- SSH terminal tabs are not persisted. A shell cannot survive a restart, so reopening the app to a row of dead terminals would be misleading.
+- Only local port forwarding is implemented. Remote and dynamic SOCKS forwarding are modelled but rejected at start time.
+- Request scripts are stored but not executed; `ScriptRunner` is the seam.
 
 ## Recommended next milestone
 
-Complete Milestone 3's workflow backbone: collection/folder persistence, environment-variable interpolation with deterministic scopes, request history, and cURL plus workspace JSON import/export. Before that work, add a desktop secure-secret repository backed by the OS credential store and IPC request cancellation.
+Round out the desktop tools: remote (`-R`) and dynamic SOCKS (`-D`) forwarding on the existing
+tunnel abstraction, SFTP browsing over the established SSH connections, and a desktop workspace
+repository that writes to application data instead of the renderer's IndexedDB.

@@ -125,7 +125,9 @@ const buildBody = async (
       // The runtime writes the multipart boundary; a manual Content-Type would omit it.
       if (headers.has('Content-Type')) {
         headers.delete('Content-Type');
-        warnings.push('The manual Content-Type header was replaced by multipart/form-data with a boundary.');
+        warnings.push(
+          'The manual Content-Type header was replaced by multipart/form-data with a boundary.',
+        );
       }
       const parts = [];
       for (const field of enabledRows(body.multipart)) {
@@ -196,7 +198,9 @@ export const buildRequest = async (
   // 2. Authorization resolution (following inheritance), then application.
   const effectiveAuth = resolveEffectiveAuth(context.workspace, request);
   const provider = getAuthProvider(effectiveAuth.auth);
-  const blocking = provider.validate(effectiveAuth.auth).filter((issue) => issue.severity === 'error');
+  const blocking = provider
+    .validate(effectiveAuth.auth)
+    .filter((issue) => issue.severity === 'error');
   if (blocking.length) {
     throw new AppError('AUTHENTICATION_ERROR', `${provider.label}: ${blocking[0]!.message}`);
   }
@@ -207,7 +211,9 @@ export const buildRequest = async (
   const resolvedAuth = provider.resolve(effectiveAuth.auth, authContext);
   // A variable can resolve to nothing (e.g. a session-only secret after a restart): say so.
   for (const issue of provider.validate(resolvedAuth)) {
-    if (!provider.validate(effectiveAuth.auth).some((original) => original.message === issue.message)) {
+    if (
+      !provider.validate(effectiveAuth.auth).some((original) => original.message === issue.message)
+    ) {
       warnings.push(`${provider.label}: ${issue.message} (after variables were substituted)`);
     }
   }
@@ -268,16 +274,29 @@ export const executeRequest = async (
     const provider = getAuthProvider(built.resolvedAuth);
     if (provider.handleChallenge) {
       const authContext = { resolve: (text: string) => text, now: context.now ?? Date.now };
-      const retry = await provider.handleChallenge(built.resolvedAuth, built.prepared, response, authContext);
+      const retry = await provider.handleChallenge(
+        built.resolvedAuth,
+        built.prepared,
+        response,
+        authContext,
+      );
       if (retry) response = await send(retry);
     }
     await context.scripts?.postResponse?.(response, request);
     return { response, built };
   } catch (error) {
-    if (timeout?.aborted && !signal?.aborted && (isAbort(error) || (error as Error)?.name === 'TimeoutError')) {
-      throw new AppError('CONNECTION_TIMEOUT', `No response within ${timeoutMs} ms (request timeout).`, {
-        cause: error,
-      });
+    if (
+      timeout?.aborted &&
+      !signal?.aborted &&
+      (isAbort(error) || (error as Error)?.name === 'TimeoutError')
+    ) {
+      throw new AppError(
+        'CONNECTION_TIMEOUT',
+        `No response within ${timeoutMs} ms (request timeout).`,
+        {
+          cause: error,
+        },
+      );
     }
     throw error;
   }

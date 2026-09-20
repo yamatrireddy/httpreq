@@ -223,3 +223,12 @@
   width: 0;
   height: 0;
 }
+
+/* Live WebSocket or SSH connection on this tab. */
+.connectedDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: var(--mantine-color-teal-6);
+  flex: none;
+}

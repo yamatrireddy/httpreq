@@ -4,7 +4,15 @@ import refresh from 'eslint-plugin-react-refresh';
 import tseslint from 'typescript-eslint';
 
 export default tseslint.config(
-  { ignores: ['**/dist/**', '**/dist-types/**', '**/coverage/**', '**/node_modules/**', '**/release/**'] },
+  {
+    ignores: [
+      '**/dist/**',
+      '**/dist-types/**',
+      '**/coverage/**',
+      '**/node_modules/**',
+      '**/release/**',
+    ],
+  },
   eslint.configs.recommended,
   ...tseslint.configs.recommended,
   {

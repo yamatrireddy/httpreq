@@ -16,7 +16,10 @@ import { parseTemplate } from '@httpreq/api-client';
 import { useVariables } from '../variableContext';
 import classes from './VariableInput.module.css';
 
-type NativeProps = Omit<InputHTMLAttributes<HTMLInputElement>, 'value' | 'onChange' | 'size' | 'type'>;
+type NativeProps = Omit<
+  InputHTMLAttributes<HTMLInputElement>,
+  'value' | 'onChange' | 'size' | 'type'
+>;
 
 export interface VariableInputProps extends NativeProps {
   value: string;
@@ -42,277 +45,297 @@ const CLOSE_DELAY = 180;
  * kept aligned while the input scrolls. Hovering a variable shows its resolved value and source;
  * secret values stay masked unless explicitly revealed.
  */
-export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(function VariableInput(
-  {
-    value,
-    onChange,
-    variant = 'box',
-    masked = false,
-    mono = true,
-    rightSection,
-    invalid,
-    completion = true,
-    className,
-    onKeyDown,
-    onBlur,
-    disabled,
-    ...inputProps
-  },
-  forwardedRef,
-) {
-  const { resolver } = useVariables();
-  const inputRef = useRef<HTMLInputElement>(null);
-  const mirrorRef = useRef<HTMLDivElement>(null);
-  const rootRef = useRef<HTMLDivElement>(null);
-  useImperativeHandle(forwardedRef, () => inputRef.current!, []);
+export const VariableInput = forwardRef<HTMLInputElement, VariableInputProps>(
+  function VariableInput(
+    {
+      value,
+      onChange,
+      variant = 'box',
+      masked = false,
+      mono = true,
+      rightSection,
+      invalid,
+      completion = true,
+      className,
+      onKeyDown,
+      onBlur,
+      disabled,
+      ...inputProps
+    },
+    forwardedRef,
+  ) {
+    const { resolver } = useVariables();
+    const inputRef = useRef<HTMLInputElement>(null);
+    const mirrorRef = useRef<HTMLDivElement>(null);
+    const rootRef = useRef<HTMLDivElement>(null);
+    useImperativeHandle(forwardedRef, () => inputRef.current!, []);
 
-  const [revealed, setRevealed] = useState(false);
-  // A value that starts with a {{reference}} names a secret rather than containing one.
-  const hidden = masked && !revealed && !value.trimStart().startsWith('{{');
-  const segments = useMemo(() => (hidden ? [] : parseTemplate(value)), [value, hidden]);
-  const highlighted = segments.some((segment) => segment.variable);
+    const [revealed, setRevealed] = useState(false);
+    // A value that starts with a {{reference}} names a secret rather than containing one.
+    const hidden = masked && !revealed && !value.trimStart().startsWith('{{');
+    const segments = useMemo(() => (hidden ? [] : parseTemplate(value)), [value, hidden]);
+    const highlighted = segments.some((segment) => segment.variable);
 
-  /* Scroll sync between the input and its mirror. */
-  const syncScroll = useCallback(() => {
-    const input = inputRef.current;
-    const mirror = mirrorRef.current;
-    if (input && mirror) mirror.style.transform = `translateX(${-input.scrollLeft}px)`;
-  }, []);
-  useLayoutEffect(syncScroll, [value, syncScroll]);
+    /* Scroll sync between the input and its mirror. */
+    const syncScroll = useCallback(() => {
+      const input = inputRef.current;
+      const mirror = mirrorRef.current;
+      if (input && mirror) mirror.style.transform = `translateX(${-input.scrollLeft}px)`;
+    }, []);
+    useLayoutEffect(syncScroll, [value, syncScroll]);
 
-  /* Hover card for the variable under the pointer. */
-  const [hover, setHover] = useState<{ name: string; left: number; width: number } | null>(null);
-  const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
-  const keepHover = () => clearTimeout(closeTimer.current);
-  const releaseHover = () => {
-    clearTimeout(closeTimer.current);
-    closeTimer.current = setTimeout(() => setHover(null), CLOSE_DELAY);
-  };
-  const onPointerMove = (clientX: number, clientY: number) => {
-    const mirror = mirrorRef.current;
-    const root = rootRef.current;
-    if (!mirror || !root || !highlighted) return;
-    const origin = root.getBoundingClientRect();
-    for (const span of mirror.querySelectorAll<HTMLElement>('[data-variable]')) {
-      const rect = span.getBoundingClientRect();
-      if (clientX >= rect.left && clientX <= rect.right && clientY >= rect.top && clientY <= rect.bottom) {
-        keepHover();
-        const name = span.dataset.variable!;
-        setHover((current) =>
-          current?.name === name && current.left === rect.left - origin.left
-            ? current
-            : { name, left: rect.left - origin.left, width: rect.width },
-        );
-        return;
+    /* Hover card for the variable under the pointer. */
+    const [hover, setHover] = useState<{ name: string; left: number; width: number } | null>(null);
+    const closeTimer = useRef<ReturnType<typeof setTimeout> | undefined>(undefined);
+    const keepHover = () => clearTimeout(closeTimer.current);
+    const releaseHover = () => {
+      clearTimeout(closeTimer.current);
+      closeTimer.current = setTimeout(() => setHover(null), CLOSE_DELAY);
+    };
+    const onPointerMove = (clientX: number, clientY: number) => {
+      const mirror = mirrorRef.current;
+      const root = rootRef.current;
+      if (!mirror || !root || !highlighted) return;
+      const origin = root.getBoundingClientRect();
+      for (const span of mirror.querySelectorAll<HTMLElement>('[data-variable]')) {
+        const rect = span.getBoundingClientRect();
+        if (
+          clientX >= rect.left &&
+          clientX <= rect.right &&
+          clientY >= rect.top &&
+          clientY <= rect.bottom
+        ) {
+          keepHover();
+          const name = span.dataset.variable!;
+          setHover((current) =>
+            current?.name === name && current.left === rect.left - origin.left
+              ? current
+              : { name, left: rect.left - origin.left, width: rect.width },
+          );
+          return;
+        }
       }
-    }
-    if (hover) releaseHover();
-  };
+      if (hover) releaseHover();
+    };
 
-  /* `{{` completion. */
-  const [suggest, setSuggest] = useState<{ query: string; index: number } | null>(null);
-  const suggestions = useMemo(() => {
-    if (!suggest) return [];
-    const query = suggest.query.toLowerCase();
-    return resolver
-      .names()
-      .filter((name) => name.toLowerCase().includes(query))
-      .slice(0, 8);
-  }, [suggest, resolver]);
+    /* `{{` completion. */
+    const [suggest, setSuggest] = useState<{ query: string; index: number } | null>(null);
+    const suggestions = useMemo(() => {
+      if (!suggest) return [];
+      const query = suggest.query.toLowerCase();
+      return resolver
+        .names()
+        .filter((name) => name.toLowerCase().includes(query))
+        .slice(0, 8);
+    }, [suggest, resolver]);
 
-  const updateSuggestions = () => {
-    const input = inputRef.current;
-    // Read the live field type: typing `{{` into a masked field unmasks it in the same keystroke.
-    if (!completion || !input || input.type === 'password' || input.selectionStart !== input.selectionEnd) {
-      setSuggest(null);
-      return;
-    }
-    const match = COMPLETION_TRIGGER.exec(input.value.slice(0, input.selectionStart ?? 0));
-    setSuggest(match ? { query: match[1]!, index: 0 } : null);
-  };
-
-  const accept = (name: string) => {
-    const input = inputRef.current;
-    if (!input) return;
-    const caret = input.selectionStart ?? value.length;
-    const before = value.slice(0, caret).replace(COMPLETION_TRIGGER, '');
-    const after = value.slice(caret).replace(/^[^{}\s]*\}\}/, '');
-    const inserted = `{{${name}}}`;
-    onChange(`${before}${inserted}${after}`);
-    setSuggest(null);
-    const position = before.length + inserted.length;
-    requestAnimationFrame(() => {
-      input.setSelectionRange(position, position);
-      syncScroll();
-    });
-  };
-
-  const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
-    if (suggest && suggestions.length) {
-      if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
-        event.preventDefault();
-        const step = event.key === 'ArrowDown' ? 1 : -1;
-        setSuggest({ ...suggest, index: (suggest.index + step + suggestions.length) % suggestions.length });
-        return;
-      }
-      if (event.key === 'Enter' || event.key === 'Tab') {
-        event.preventDefault();
-        accept(suggestions[suggest.index]!);
-        return;
-      }
-      if (event.key === 'Escape') {
-        event.preventDefault();
-        event.stopPropagation();
+    const updateSuggestions = () => {
+      const input = inputRef.current;
+      // Read the live field type: typing `{{` into a masked field unmasks it in the same keystroke.
+      if (
+        !completion ||
+        !input ||
+        input.type === 'password' ||
+        input.selectionStart !== input.selectionEnd
+      ) {
         setSuggest(null);
         return;
       }
-    }
-    onKeyDown?.(event);
-  };
+      const match = COMPLETION_TRIGGER.exec(input.value.slice(0, input.selectionStart ?? 0));
+      setSuggest(match ? { query: match[1]!, index: 0 } : null);
+    };
 
-  const listId = `${inputProps.id ?? inputProps.name ?? 'variable'}-suggestions`;
-  const suggestionsOpen = !!suggest && suggestions.length > 0;
+    const accept = (name: string) => {
+      const input = inputRef.current;
+      if (!input) return;
+      const caret = input.selectionStart ?? value.length;
+      const before = value.slice(0, caret).replace(COMPLETION_TRIGGER, '');
+      const after = value.slice(caret).replace(/^[^{}\s]*\}\}/, '');
+      const inserted = `{{${name}}}`;
+      onChange(`${before}${inserted}${after}`);
+      setSuggest(null);
+      const position = before.length + inserted.length;
+      requestAnimationFrame(() => {
+        input.setSelectionRange(position, position);
+        syncScroll();
+      });
+    };
 
-  return (
-    <div
-      ref={rootRef}
-      className={`${classes.root} ${className ?? ''}`}
-      data-variant={variant}
-      data-mono={mono || undefined}
-      data-invalid={invalid || undefined}
-      data-disabled={disabled || undefined}
-    >
-      <Popover
-        opened={suggestionsOpen}
-        position="bottom-start"
-        offset={4}
-        width="target"
-        withinPortal
-        shadow="md"
-        middlewares={{ flip: true, shift: true }}
+    const handleKeyDown = (event: KeyboardEvent<HTMLInputElement>) => {
+      if (suggest && suggestions.length) {
+        if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+          event.preventDefault();
+          const step = event.key === 'ArrowDown' ? 1 : -1;
+          setSuggest({
+            ...suggest,
+            index: (suggest.index + step + suggestions.length) % suggestions.length,
+          });
+          return;
+        }
+        if (event.key === 'Enter' || event.key === 'Tab') {
+          event.preventDefault();
+          accept(suggestions[suggest.index]!);
+          return;
+        }
+        if (event.key === 'Escape') {
+          event.preventDefault();
+          event.stopPropagation();
+          setSuggest(null);
+          return;
+        }
+      }
+      onKeyDown?.(event);
+    };
+
+    const listId = `${inputProps.id ?? inputProps.name ?? 'variable'}-suggestions`;
+    const suggestionsOpen = !!suggest && suggestions.length > 0;
+
+    return (
+      <div
+        ref={rootRef}
+        className={`${classes.root} ${className ?? ''}`}
+        data-variant={variant}
+        data-mono={mono || undefined}
+        data-invalid={invalid || undefined}
+        data-disabled={disabled || undefined}
       >
-        <Popover.Target>
-          <div className={classes.field}>
-            {highlighted && (
-              <div ref={mirrorRef} className={classes.mirror} aria-hidden>
-                {segments.map((segment) =>
-                  segment.variable ? (
-                    <span
-                      key={segment.start}
-                      data-variable={segment.variable}
-                      data-defined={resolver.lookup(segment.variable) ? 'true' : 'false'}
-                      className={classes.variable}
-                    >
-                      {segment.text}
-                    </span>
-                  ) : (
-                    <span key={segment.start}>{segment.text}</span>
-                  ),
-                )}
-              </div>
-            )}
-            <input
-              {...inputProps}
-              ref={inputRef}
-              className={classes.input}
-              data-highlighted={highlighted || undefined}
-              type={hidden ? 'password' : 'text'}
-              value={value}
-              disabled={disabled}
-              spellCheck={false}
-              autoComplete="off"
-              aria-invalid={invalid || undefined}
-              aria-autocomplete={completion ? 'list' : undefined}
-              aria-expanded={completion ? suggestionsOpen : undefined}
-              aria-controls={suggestionsOpen ? listId : undefined}
-              onChange={(event) => {
-                onChange(event.currentTarget.value);
-                syncScroll();
-                requestAnimationFrame(updateSuggestions);
-              }}
-              onKeyDown={handleKeyDown}
-              onKeyUp={(event) => {
-                syncScroll();
-                if (event.key === 'ArrowLeft' || event.key === 'ArrowRight' || event.key === 'Home' || event.key === 'End') {
-                  updateSuggestions();
-                }
-              }}
-              onScroll={syncScroll}
-              onSelect={syncScroll}
-              onMouseMove={(event) => onPointerMove(event.clientX, event.clientY)}
-              onMouseLeave={releaseHover}
-              onBlur={(event) => {
-                setSuggest(null);
-                onBlur?.(event);
-              }}
-            />
-          </div>
-        </Popover.Target>
-        <Popover.Dropdown p={4} className={classes.suggestions}>
-          <div role="listbox" id={listId} aria-label="Variables">
-            {suggestions.map((name, index) => {
-              const definition = resolver.lookup(name);
-              return (
-                <UnstyledButton
-                  key={name}
-                  role="option"
-                  aria-selected={index === suggest?.index}
-                  className={classes.option}
-                  tabIndex={-1}
-                  onMouseDown={(event) => {
-                    event.preventDefault();
-                    accept(name);
-                  }}
-                >
-                  <span className={classes.optionName}>{name}</span>
-                  <Text span size="xs" c="dimmed" truncate>
-                    {definition?.dynamic ? definition.value : definition?.source}
-                  </Text>
-                </UnstyledButton>
-              );
-            })}
-          </div>
-        </Popover.Dropdown>
-      </Popover>
-
-      <Popover
-        opened={!!hover && !suggestionsOpen}
-        position="bottom-start"
-        offset={6}
-        withinPortal
-        shadow="md"
-        middlewares={{ flip: true, shift: true }}
-      >
-        <Popover.Target>
-          <span
-            className={classes.anchor}
-            style={{ left: hover?.left ?? 0, width: hover?.width ?? 0 }}
-            aria-hidden
-          />
-        </Popover.Target>
-        <Popover.Dropdown p="xs" onMouseEnter={keepHover} onMouseLeave={releaseHover} maw={360}>
-          {hover && <VariableDetails name={hover.name} />}
-        </Popover.Dropdown>
-      </Popover>
-
-      {masked && (
-        <ActionIcon
-          variant="subtle"
-          color="gray"
-          size="sm"
-          className={classes.reveal}
-          aria-label={revealed ? 'Hide value' : 'Show value'}
-          aria-pressed={revealed}
-          onClick={() => setRevealed((current) => !current)}
-          disabled={disabled}
+        <Popover
+          opened={suggestionsOpen}
+          position="bottom-start"
+          offset={4}
+          width="target"
+          withinPortal
+          shadow="md"
+          middlewares={{ flip: true, shift: true }}
         >
-          {revealed ? <IconEyeOff size={14} /> : <IconEye size={14} />}
-        </ActionIcon>
-      )}
-      {rightSection}
-    </div>
-  );
-});
+          <Popover.Target>
+            <div className={classes.field}>
+              {highlighted && (
+                <div ref={mirrorRef} className={classes.mirror} aria-hidden>
+                  {segments.map((segment) =>
+                    segment.variable ? (
+                      <span
+                        key={segment.start}
+                        data-variable={segment.variable}
+                        data-defined={resolver.lookup(segment.variable) ? 'true' : 'false'}
+                        className={classes.variable}
+                      >
+                        {segment.text}
+                      </span>
+                    ) : (
+                      <span key={segment.start}>{segment.text}</span>
+                    ),
+                  )}
+                </div>
+              )}
+              <input
+                {...inputProps}
+                ref={inputRef}
+                className={classes.input}
+                data-highlighted={highlighted || undefined}
+                type={hidden ? 'password' : 'text'}
+                value={value}
+                disabled={disabled}
+                spellCheck={false}
+                autoComplete="off"
+                aria-invalid={invalid || undefined}
+                aria-autocomplete={completion ? 'list' : undefined}
+                aria-expanded={completion ? suggestionsOpen : undefined}
+                aria-controls={suggestionsOpen ? listId : undefined}
+                onChange={(event) => {
+                  onChange(event.currentTarget.value);
+                  syncScroll();
+                  requestAnimationFrame(updateSuggestions);
+                }}
+                onKeyDown={handleKeyDown}
+                onKeyUp={(event) => {
+                  syncScroll();
+                  if (
+                    event.key === 'ArrowLeft' ||
+                    event.key === 'ArrowRight' ||
+                    event.key === 'Home' ||
+                    event.key === 'End'
+                  ) {
+                    updateSuggestions();
+                  }
+                }}
+                onScroll={syncScroll}
+                onSelect={syncScroll}
+                onMouseMove={(event) => onPointerMove(event.clientX, event.clientY)}
+                onMouseLeave={releaseHover}
+                onBlur={(event) => {
+                  setSuggest(null);
+                  onBlur?.(event);
+                }}
+              />
+            </div>
+          </Popover.Target>
+          <Popover.Dropdown p={4} className={classes.suggestions}>
+            <div role="listbox" id={listId} aria-label="Variables">
+              {suggestions.map((name, index) => {
+                const definition = resolver.lookup(name);
+                return (
+                  <UnstyledButton
+                    key={name}
+                    role="option"
+                    aria-selected={index === suggest?.index}
+                    className={classes.option}
+                    tabIndex={-1}
+                    onMouseDown={(event) => {
+                      event.preventDefault();
+                      accept(name);
+                    }}
+                  >
+                    <span className={classes.optionName}>{name}</span>
+                    <Text span size="xs" c="dimmed" truncate>
+                      {definition?.dynamic ? definition.value : definition?.source}
+                    </Text>
+                  </UnstyledButton>
+                );
+              })}
+            </div>
+          </Popover.Dropdown>
+        </Popover>
+
+        <Popover
+          opened={!!hover && !suggestionsOpen}
+          position="bottom-start"
+          offset={6}
+          withinPortal
+          shadow="md"
+          middlewares={{ flip: true, shift: true }}
+        >
+          <Popover.Target>
+            <span
+              className={classes.anchor}
+              style={{ left: hover?.left ?? 0, width: hover?.width ?? 0 }}
+              aria-hidden
+            />
+          </Popover.Target>
+          <Popover.Dropdown p="xs" onMouseEnter={keepHover} onMouseLeave={releaseHover} maw={360}>
+            {hover && <VariableDetails name={hover.name} />}
+          </Popover.Dropdown>
+        </Popover>
+
+        {masked && (
+          <ActionIcon
+            variant="subtle"
+            color="gray"
+            size="sm"
+            className={classes.reveal}
+            aria-label={revealed ? 'Hide value' : 'Show value'}
+            aria-pressed={revealed}
+            onClick={() => setRevealed((current) => !current)}
+            disabled={disabled}
+          >
+            {revealed ? <IconEyeOff size={14} /> : <IconEye size={14} />}
+          </ActionIcon>
+        )}
+        {rightSection}
+      </div>
+    );
+  },
+);
 
 /** Resolved value and source of one variable; secrets need an explicit reveal. */
 export function VariableDetails({ name }: { name: string }) {
@@ -339,7 +362,10 @@ export function VariableDetails({ name }: { name: string }) {
               {definition.secret && !revealed ? '••••••••' : definition.value || '(empty)'}
             </Text>
             {definition.secret && (
-              <UnstyledButton className={classes.revealLink} onClick={() => setRevealed((current) => !current)}>
+              <UnstyledButton
+                className={classes.revealLink}
+                onClick={() => setRevealed((current) => !current)}
+              >
                 {revealed ? 'Hide' : 'Reveal'}
               </UnstyledButton>
             )}
@@ -347,7 +373,9 @@ export function VariableDetails({ name }: { name: string }) {
           <Text size="xs" c="dimmed" mt={6}>
             Source
           </Text>
-          <Text size="xs">{definition.dynamic ? 'Dynamic variable' : `${definition.source} environment`}</Text>
+          <Text size="xs">
+            {definition.dynamic ? 'Dynamic variable' : `${definition.source} environment`}
+          </Text>
         </>
       )}
     </div>

@@ -2,10 +2,11 @@
 import { MantineProvider } from '@mantine/core';
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { beforeAll, describe, expect, it, vi } from 'vitest';
-import { RequestTabs } from './RequestTabs';
+import { RequestTabs, type TabItem } from './RequestTabs';
 
-const requests = ['One', 'Two', 'Three'].map((name, index) => ({
+const requests: TabItem[] = ['One', 'Two', 'Three'].map((name, index) => ({
   id: `r${index}`,
+  kind: 'request',
   name,
   method: 'GET' as const,
   url: '',

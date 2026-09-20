@@ -1,0 +1,36 @@
+.trigger {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  height: 24px;
+  max-width: 220px;
+  padding: 0 8px;
+  border-radius: var(--mantine-radius-sm);
+  font-size: var(--mantine-font-size-xs);
+  color: var(--mantine-color-text);
+  -webkit-app-region: no-drag;
+}
+
+.trigger:hover,
+.trigger:focus-visible {
+  background: var(--mantine-color-default-hover);
+}
+
+.trigger:disabled {
+  opacity: 0.6;
+  cursor: progress;
+}
+
+.name {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+  font-weight: 600;
+}
+
+.itemName {
+  display: block;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}

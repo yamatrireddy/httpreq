@@ -1,23 +1,37 @@
 import { Tooltip, UnstyledButton } from '@mantine/core';
-import { IconBolt, IconFolders, IconHistory, IconServer, IconVariable } from '@tabler/icons-react';
-import { useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import {
+  IconFolders,
+  IconHistory,
+  IconRouter,
+  IconServer,
+  IconVariable,
+} from '@tabler/icons-react';
+import { useEffect, useRef, useState, type KeyboardEvent, type PointerEvent } from 'react';
+import { useCapabilities } from '../capabilities';
 import { clampSidebarWidth, usePreferences } from '../preferences';
-import { useWorkbenchStore, type SidebarView } from '../store';
+import { SshPanel } from '../ssh/SshPanel';
+import { TunnelsPanel } from '../tunnels/TunnelsPanel';
+import { DESKTOP_SIDEBAR_VIEWS, useWorkbenchStore, type SidebarView } from '../store';
 import { CollectionsExplorer } from './CollectionsExplorer';
 import { ContainerSettingsDialog } from './ContainerSettingsDialog';
 import { EnvironmentsPanel } from './EnvironmentsPanel';
 import { HistoryPanel } from './HistoryPanel';
 import classes from './Sidebar.module.css';
 
-const VIEWS: { id: SidebarView; label: string; icon: typeof IconFolders }[] = [
+interface ViewDefinition {
+  id: SidebarView;
+  label: string;
+  icon: typeof IconFolders;
+  /** Only shown when the platform supports it; the browser sees it disabled instead. */
+  desktopOnly?: boolean;
+}
+
+const VIEWS: ViewDefinition[] = [
   { id: 'collections', label: 'Collections', icon: IconFolders },
   { id: 'environments', label: 'Environments', icon: IconVariable },
   { id: 'history', label: 'History', icon: IconHistory },
-];
-
-const UPCOMING = [
-  { label: 'WebSockets', icon: IconBolt },
-  { label: 'SSH', icon: IconServer },
+  { id: 'ssh', label: 'SSH', icon: IconServer, desktopOnly: true },
+  { id: 'tunnels', label: 'Tunnels', icon: IconRouter, desktopOnly: true },
 ];
 
 const KEYBOARD_STEP = 16;
@@ -32,6 +46,13 @@ interface Props {
 export function Sidebar({ onClearHistory, onNavigate }: Props) {
   const view = useWorkbenchStore((state) => state.sidebarView);
   const setView = useWorkbenchStore((state) => state.setSidebarView);
+  const capabilities = useCapabilities();
+  const desktopViews = capabilities.ssh;
+
+  // A stored view from a desktop session must not leave the browser on an empty panel.
+  useEffect(() => {
+    if (!desktopViews && DESKTOP_SIDEBAR_VIEWS.includes(view)) setView('collections');
+  }, [desktopViews, setView, view]);
   const width = usePreferences((state) => state.sidebarWidth);
   const setWidth = usePreferences((state) => state.setSidebarWidth);
   const [settingsId, setSettingsId] = useState<string | null>(null);
@@ -81,33 +102,41 @@ export function Sidebar({ onClearHistory, onNavigate }: Props) {
   return (
     <div className={classes.sidebar}>
       <nav className={classes.rail} aria-label="Sidebar views">
-        {VIEWS.map((item) => (
-          <Tooltip key={item.id} label={item.label} position="right">
-            <UnstyledButton
-              className={classes.railButton}
-              data-active={view === item.id || undefined}
-              aria-label={item.label}
-              aria-pressed={view === item.id}
-              onClick={() => setView(item.id)}
+        {VIEWS.map((item) => {
+          const unavailable = !!item.desktopOnly && !desktopViews;
+          return (
+            <Tooltip
+              key={item.id}
+              label={unavailable ? `${item.label} (desktop app only)` : item.label}
+              position="right"
             >
-              <item.icon size={19} stroke={1.6} />
-            </UnstyledButton>
-          </Tooltip>
-        ))}
+              <UnstyledButton
+                className={classes.railButton}
+                data-active={(!unavailable && view === item.id) || undefined}
+                data-disabled={unavailable || undefined}
+                aria-label={unavailable ? `${item.label}, desktop app only` : item.label}
+                aria-pressed={!unavailable && view === item.id}
+                aria-disabled={unavailable || undefined}
+                onClick={() => {
+                  if (!unavailable) setView(item.id);
+                }}
+              >
+                <item.icon size={19} stroke={1.6} />
+              </UnstyledButton>
+            </Tooltip>
+          );
+        })}
         <div className={classes.railSpacer} />
-        {UPCOMING.map((item) => (
-          <Tooltip key={item.label} label={`${item.label} (coming soon)`} position="right">
-            <UnstyledButton className={classes.railButton} aria-label={`${item.label}, coming soon`} data-disabled>
-              <item.icon size={19} stroke={1.6} />
-            </UnstyledButton>
-          </Tooltip>
-        ))}
       </nav>
 
       <div className={classes.panel}>
-        {view === 'collections' && <CollectionsExplorer onOpenSettings={setSettingsId} onOpened={onNavigate} />}
+        {view === 'collections' && (
+          <CollectionsExplorer onOpenSettings={setSettingsId} onOpened={onNavigate} />
+        )}
         {view === 'environments' && <EnvironmentsPanel />}
         {view === 'history' && <HistoryPanel onClear={onClearHistory} onOpened={onNavigate} />}
+        {view === 'ssh' && desktopViews && <SshPanel onOpened={onNavigate} />}
+        {view === 'tunnels' && desktopViews && <TunnelsPanel />}
       </div>
 
       <div

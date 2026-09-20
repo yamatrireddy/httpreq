@@ -17,7 +17,15 @@ interface Props {
 }
 
 /** Monaco editor with the app's font, theme and compact defaults (line numbers, search, folding). */
-export function CodeEditor({ value, onChange, language, ariaLabel, readOnly, className, onEditor }: Props) {
+export function CodeEditor({
+  value,
+  onChange,
+  language,
+  ariaLabel,
+  readOnly,
+  className,
+  onEditor,
+}: Props) {
   const colorScheme = useComputedColorScheme('dark');
   return (
     <Box className={`editor-frame ${className ?? ''}`}>

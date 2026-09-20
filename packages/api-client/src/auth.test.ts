@@ -49,16 +49,35 @@ describe('jwt', () => {
     const token = await signJwt(config, 1_700_000_000_000);
     const [header, payload, signature] = token.split('.');
     const decode = (part: string) =>
-      JSON.parse(new TextDecoder().decode(base64ToBytes(part.replace(/-/g, '+').replace(/_/g, '/'))));
+      JSON.parse(
+        new TextDecoder().decode(base64ToBytes(part.replace(/-/g, '+').replace(/_/g, '/'))),
+      );
     expect(decode(header!)).toEqual({ alg: 'HS256', typ: 'JWT' });
-    expect(decode(payload!)).toEqual({ iat: 1_700_000_000, exp: 1_700_000_060, iss: 'httpreq', role: 'admin' });
-    const key = await crypto.subtle.importKey('raw', utf8('top-secret') as BufferSource, { name: 'HMAC', hash: 'SHA-256' }, false, ['sign']);
-    const expected = new Uint8Array(await crypto.subtle.sign('HMAC', key, utf8(`${header}.${payload}`) as BufferSource));
+    expect(decode(payload!)).toEqual({
+      iat: 1_700_000_000,
+      exp: 1_700_000_060,
+      iss: 'httpreq',
+      role: 'admin',
+    });
+    const key = await crypto.subtle.importKey(
+      'raw',
+      utf8('top-secret') as BufferSource,
+      { name: 'HMAC', hash: 'SHA-256' },
+      false,
+      ['sign'],
+    );
+    const expected = new Uint8Array(
+      await crypto.subtle.sign('HMAC', key, utf8(`${header}.${payload}`) as BufferSource),
+    );
     expect(signature).toBe(base64UrlFromBase64(bytesToBase64(expected)));
   });
 
   it('reports malformed payload JSON as a blocking issue', () => {
-    const issues = jwtAuthProvider.validate({ ...jwtAuthProvider.create(), secret: 's', payload: '{' });
+    const issues = jwtAuthProvider.validate({
+      ...jwtAuthProvider.create(),
+      secret: 's',
+      payload: '{',
+    });
     expect(issues).toContainEqual(expect.objectContaining({ field: 'payload', severity: 'error' }));
   });
 });
@@ -70,11 +89,18 @@ describe('provider persistence', () => {
       token: '',
       prefix: 'Bearer',
     });
-    expect(serializeAuth({ type: 'bearer', token: '{{accessToken}}', prefix: 'Bearer' })).toMatchObject({
+    expect(
+      serializeAuth({ type: 'bearer', token: '{{accessToken}}', prefix: 'Bearer' }),
+    ).toMatchObject({
       token: '{{accessToken}}',
     });
     expect(
-      serializeAuth({ ...oauth2AuthProvider.create(), clientSecret: 'shh', accessToken: 'tok', clientId: 'app' }),
+      serializeAuth({
+        ...oauth2AuthProvider.create(),
+        clientSecret: 'shh',
+        accessToken: 'tok',
+        clientId: 'app',
+      }),
     ).toMatchObject({ clientSecret: '', accessToken: '', clientId: 'app' });
   });
 
@@ -100,8 +126,12 @@ describe('provider persistence', () => {
 describe('oauth2', () => {
   it('parses the redirect URL and checks state', () => {
     expect(parseAuthorizationResponse('https://app/cb?code=abc&state=s1', 's1')).toBe('abc');
-    expect(() => parseAuthorizationResponse('https://app/cb?code=abc&state=other', 's1')).toThrow(/state/);
-    expect(() => parseAuthorizationResponse('https://app/cb?error=access_denied', 's1')).toThrow(/access_denied/);
+    expect(() => parseAuthorizationResponse('https://app/cb?code=abc&state=other', 's1')).toThrow(
+      /state/,
+    );
+    expect(() => parseAuthorizationResponse('https://app/cb?error=access_denied', 's1')).toThrow(
+      /access_denied/,
+    );
     expect(parseAuthorizationResponse('raw-code', 's1')).toBe('raw-code');
   });
 
@@ -130,7 +160,12 @@ describe('oauth2', () => {
       },
       { now: 1000 },
     );
-    expect(tokens).toEqual({ accessToken: 'at', refreshToken: '', tokenType: 'Bearer', expiresAt: 61_000 });
+    expect(tokens).toEqual({
+      accessToken: 'at',
+      refreshToken: '',
+      tokenType: 'Bearer',
+      expiresAt: 61_000,
+    });
     expect(sent?.headers.Authorization).toBe(`Basic ${btoa('app:secret')}`);
     expect(sent?.body).toEqual({ kind: 'text', text: 'grant_type=client_credentials&scope=read' });
   });

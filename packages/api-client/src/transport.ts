@@ -9,7 +9,9 @@ const toFetchBody = (body: PreparedBody | undefined): BodyInit | undefined => {
     if ('bytes' in part) {
       form.append(
         part.name,
-        new Blob([part.bytes as BlobPart], { type: part.contentType || 'application/octet-stream' }),
+        new Blob([part.bytes as BlobPart], {
+          type: part.contentType || 'application/octet-stream',
+        }),
         part.fileName,
       );
     } else {

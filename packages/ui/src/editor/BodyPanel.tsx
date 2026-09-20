@@ -1,4 +1,14 @@
-import { Badge, Button, FileButton, Group, SegmentedControl, Select, Stack, Text, Tooltip } from '@mantine/core';
+import {
+  Badge,
+  Button,
+  FileButton,
+  Group,
+  SegmentedControl,
+  Select,
+  Stack,
+  Text,
+  Tooltip,
+} from '@mantine/core';
 import { IconFile, IconUpload, IconWand } from '@tabler/icons-react';
 import type { editor } from 'monaco-editor';
 import { useMemo, useRef } from 'react';
@@ -53,7 +63,10 @@ export function BodyPanel({ request, onChange }: Props) {
   const { body } = request;
   const setBody = (patch: Partial<RequestBody>) => onChange({ body: { ...body, ...patch } });
   const jsonEditor = useRef<editor.IStandaloneCodeEditor | null>(null);
-  const error = useMemo(() => (body.mode === 'json' ? jsonError(body.json) : null), [body.mode, body.json]);
+  const error = useMemo(
+    () => (body.mode === 'json' ? jsonError(body.json) : null),
+    [body.mode, body.json],
+  );
   const noBodyMethod = request.method === 'GET' || request.method === 'HEAD';
 
   return (
@@ -88,7 +101,9 @@ export function BodyPanel({ request, onChange }: Props) {
               variant="subtle"
               color="gray"
               leftSection={<IconWand size={13} />}
-              onClick={() => void jsonEditor.current?.getAction('editor.action.formatDocument')?.run()}
+              onClick={() =>
+                void jsonEditor.current?.getAction('editor.action.formatDocument')?.run()
+              }
               title="Format (Shift+Alt+F)"
             >
               Format
@@ -151,7 +166,15 @@ export function BodyPanel({ request, onChange }: Props) {
           label="Multipart fields"
           items={body.multipart}
           onChange={(multipart) => setBody({ multipart })}
-          createRow={(patch) => ({ id: createId(), key: '', value: '', enabled: true, kind: 'text', file: null, ...patch })}
+          createRow={(patch) => ({
+            id: createId(),
+            key: '',
+            value: '',
+            enabled: true,
+            kind: 'text',
+            file: null,
+            ...patch,
+          })}
           renderRowExtras={(item, update) => (
             <SegmentedControl
               size="xs"
@@ -192,7 +215,12 @@ function FilePicker({
     <Group gap="xs" wrap="nowrap" px={compact ? 6 : 0} className={classes.filePicker}>
       <FileButton onChange={(chosen) => chosen && onChange(rememberFile(chosen))}>
         {(props) => (
-          <Button {...props} size="compact-xs" variant="default" leftSection={<IconUpload size={13} />}>
+          <Button
+            {...props}
+            size="compact-xs"
+            variant="default"
+            leftSection={<IconUpload size={13} />}
+          >
             {file ? 'Replace' : 'Select file'}
           </Button>
         )}

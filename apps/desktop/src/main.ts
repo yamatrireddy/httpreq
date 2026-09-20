@@ -24,6 +24,7 @@ import {
 } from '@httpreq/shared';
 import { executeHttp } from './http';
 import { buildMacMenu } from './menu';
+import { registerServices } from './services';
 import {
   isAllowedExternalUrl,
   isAuthorizationUrl,
@@ -210,6 +211,12 @@ ipcMain.handle('net:check', async (event): Promise<boolean> => {
   }
 });
 
+/**
+ * WebSocket, SSH and tunnel services. Registered once, before the first window exists, so their
+ * IPC handlers are in place by the time the renderer loads.
+ */
+const services = registerServices({ isTrustedSender });
+
 const createWindow = async () => {
   const window = new BrowserWindow({
     width: 1440,
@@ -243,6 +250,10 @@ const createWindow = async () => {
   window.on('unmaximize', notifyState);
   window.on('enter-full-screen', notifyState);
   window.on('leave-full-screen', notifyState);
+
+  // Sockets and shells belong to the window that opened them and die with it.
+  const senderId = window.webContents.id;
+  window.webContents.on('destroyed', () => services.releaseSender(senderId));
 
   window.webContents.setWindowOpenHandler(() => ({ action: 'deny' }));
   // The renderer is a single-page app; never let it navigate away from the bundled UI.
@@ -278,6 +289,18 @@ app.whenReady().then(async () => {
   app.on('activate', () => {
     if (BrowserWindow.getAllWindows().length === 0) void createWindow();
   });
+});
+
+/**
+ * Quitting is held just long enough to close every socket, SSH channel and listening port, so
+ * HttpReq never leaves an orphan session or an occupied local port behind.
+ */
+let shuttingDown = false;
+app.on('before-quit', (event) => {
+  if (shuttingDown) return;
+  event.preventDefault();
+  shuttingDown = true;
+  void services.disposeAll().finally(() => app.quit());
 });
 
 app.on('window-all-closed', () => {
