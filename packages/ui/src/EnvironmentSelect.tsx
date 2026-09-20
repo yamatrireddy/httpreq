@@ -2,6 +2,7 @@ import { Select } from '@mantine/core';
 import { IconVariable } from '@tabler/icons-react';
 import { memo } from 'react';
 import { useWorkbenchStore } from './store';
+import classes from './EnvironmentSelect.module.css';
 
 const NONE = '__none__';
 
@@ -13,6 +14,7 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
   return (
     <Select
       aria-label="Active environment"
+      className={classes.select}
       size="xs"
       w={170}
       mx={6}

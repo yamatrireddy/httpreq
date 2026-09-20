@@ -29,6 +29,8 @@ interface Props {
   unsavedIds: ReadonlySet<string>;
   onActivate: (id: string) => void;
   onClose: (id: string) => void;
+  /** Closes several tabs as one operation (a single unsaved-changes prompt covers them all). */
+  onCloseMany?: (ids: string[]) => void;
   onNew: () => void;
   onMove: (id: string, toIndex: number) => void;
   newShortcut?: string;
@@ -57,6 +59,7 @@ export const RequestTabs = memo(function RequestTabs({
   unsavedIds,
   onActivate,
   onClose,
+  onCloseMany,
   onNew,
   onMove,
   newShortcut,
@@ -68,6 +71,7 @@ export const RequestTabs = memo(function RequestTabs({
   const [edges, setEdges] = useState({ previous: false, next: false });
   const [focusedId, setFocusedId] = useState<string | null>(null);
   const [drop, setDrop] = useState<{ id: string; side: 'before' | 'after' } | null>(null);
+  const [menu, setMenu] = useState<{ id: string; x: number; y: number } | null>(null);
   const draggedId = useRef<string | null>(null);
   const focusAfterRender = useRef(false);
   const closable = requests.length > 0;
@@ -197,10 +201,35 @@ export const RequestTabs = memo(function RequestTabs({
       event.preventDefault();
       close(currentId);
       return;
+    } else if (event.key === 'ContextMenu' || (event.key === 'F10' && event.shiftKey)) {
+      event.preventDefault();
+      openMenuAtTab(currentId);
+      return;
     }
     if (target === undefined) return;
     event.preventDefault();
     focusTab(requests[target]!.id);
+  };
+
+  const openMenu = (id: string, x: number, y: number) => {
+    setFocusedId(id);
+    setMenu({ id, x, y });
+  };
+
+  /** Opens the menu next to the tab itself, for the keyboard and for programmatic callers. */
+  const openMenuAtTab = (id: string) => {
+    const rect = tabElement(id)?.getBoundingClientRect();
+    openMenu(id, rect ? rect.left : 0, rect ? rect.bottom : 0);
+  };
+
+  const closeMenu = () => setMenu(null);
+
+  /** Every menu action closes as one operation, so a single prompt covers the whole set. */
+  const runCloseAction = (ids: string[]) => {
+    closeMenu();
+    if (!ids.length) return;
+    if (onCloseMany) onCloseMany(ids);
+    else ids.forEach(onClose);
   };
 
   const onDragStart = (event: DragEvent<HTMLElement>, id: string) => {
@@ -276,6 +305,7 @@ export const RequestTabs = memo(function RequestTabs({
               onActivate={onActivate}
               onFocus={setFocusedId}
               onClose={close}
+              onContextMenu={openMenu}
               onDragStart={onDragStart}
               onDragOver={onDragOver}
               onDrop={onDrop}
@@ -343,9 +373,70 @@ export const RequestTabs = memo(function RequestTabs({
 
       <div className={classes.spacer} />
       {actions}
+
+      <TabContextMenu
+        target={menu}
+        requests={requests}
+        onClose={closeMenu}
+        onRun={runCloseAction}
+      />
     </div>
   );
 });
+
+interface ContextMenuProps {
+  target: { id: string; x: number; y: number } | null;
+  requests: TabRequest[];
+  onClose: () => void;
+  onRun: (ids: string[]) => void;
+}
+
+/**
+ * Tab context menu, anchored to the pointer. The close actions follow the strip order, so
+ * "to the left" and "to the right" always mean what the user sees.
+ */
+function TabContextMenu({ target, requests, onClose, onRun }: ContextMenuProps) {
+  const index = target ? requests.findIndex((request) => request.id === target.id) : -1;
+  const ids = requests.map((request) => request.id);
+  const left = index > 0 ? ids.slice(0, index) : [];
+  const right = index >= 0 ? ids.slice(index + 1) : [];
+  const others = [...left, ...right];
+  return (
+    <Menu
+      opened={index >= 0}
+      onClose={onClose}
+      position="bottom-start"
+      shadow="md"
+      width={230}
+      withinPortal
+      trapFocus
+      closeOnClickOutside
+      closeOnEscape
+    >
+      <Menu.Target>
+        <span
+          aria-hidden
+          className={classes.menuAnchor}
+          style={{ left: target?.x ?? 0, top: target?.y ?? 0 }}
+        />
+      </Menu.Target>
+      <Menu.Dropdown aria-label="Tab actions">
+        <Menu.Item onClick={() => onRun(target ? [target.id] : [])}>Close Tab</Menu.Item>
+        <Menu.Item disabled={!right.length} onClick={() => onRun(right)}>
+          Close Tabs to the Right
+        </Menu.Item>
+        <Menu.Item disabled={!left.length} onClick={() => onRun(left)}>
+          Close Tabs to the Left
+        </Menu.Item>
+        <Menu.Item disabled={!others.length} onClick={() => onRun(others)}>
+          Close Other Tabs
+        </Menu.Item>
+        <Menu.Divider />
+        <Menu.Item onClick={() => onRun(ids)}>Close All Tabs</Menu.Item>
+      </Menu.Dropdown>
+    </Menu>
+  );
+}
 
 function MethodLabel({ method }: { method: HttpMethod }) {
   return (
@@ -369,6 +460,7 @@ interface TabProps {
   onActivate: (id: string) => void;
   onFocus: (id: string) => void;
   onClose: (id: string) => void;
+  onContextMenu: (id: string, x: number, y: number) => void;
   onDragStart: (event: DragEvent<HTMLElement>, id: string) => void;
   onDragOver: (event: DragEvent<HTMLElement>, id: string) => void;
   onDrop: (event: DragEvent<HTMLElement>) => void;
@@ -386,6 +478,7 @@ const RequestTab = memo(function RequestTab({
   onActivate,
   onFocus,
   onClose,
+  onContextMenu,
   onDragStart,
   onDragOver,
   onDrop,
@@ -403,6 +496,10 @@ const RequestTab = memo(function RequestTab({
       onDragOver={(event) => onDragOver(event, request.id)}
       onDrop={onDrop}
       onDragEnd={onDragEnd}
+      onContextMenu={(event) => {
+        event.preventDefault();
+        onContextMenu(request.id, event.clientX, event.clientY);
+      }}
       onMouseDown={(event) => {
         // Middle-click closes, as in browsers and editors; suppress the autoscroll cursor.
         if (event.button === 1) event.preventDefault();

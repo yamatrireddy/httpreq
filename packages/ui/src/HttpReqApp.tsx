@@ -29,7 +29,7 @@ import { readAttachment } from './attachments';
 import { AuthServicesContext, type AuthServices } from './auth/authServices';
 import type { CommandMap } from './commands';
 import { useShortcutManager } from './commands';
-import { confirmAction } from './confirm';
+import { closeTabs as closeRequestTabs } from './closeTabs';
 import { ConfirmDialog } from './ConfirmDialog';
 import {
   browserConnectivityProbe,
@@ -316,30 +316,12 @@ export function HttpReqApp({ runtime, repository, history, desktop, version }: P
     return ok;
   }, [saveRequest]);
 
-  /** Closes a tab, asking first when it has unsaved changes. */
-  const closeTab = useCallback(
-    async (id: string) => {
-      const state = useWorkbenchStore.getState();
-      if (state.drafts[id]) {
-        const name = state.workspace.requests.find((request) => request.id === id)?.name ?? 'this request';
-        const choice = await confirmAction({
-          title: 'Unsaved changes',
-          message: `Save the changes to “${name}” before closing it?`,
-          confirmLabel: 'Save',
-          alternateLabel: 'Don’t save',
-        });
-        if (choice === 'cancel') return;
-        if (choice === 'confirm' && !(await saveRequest(id))) {
-          notifications.show({ color: 'red', title: 'Save failed', message: 'The tab was kept open.' });
-          return;
-        }
-        if (choice === 'alternate') useWorkbenchStore.getState().discardDraft(id);
-      }
-      cancelRequest(id);
-      useWorkbenchStore.getState().closeRequest(id);
-    },
+  const closeTabs = useCallback(
+    (ids: Iterable<string>) => closeRequestTabs(ids, { saveRequest, cancelRequest }),
     [cancelRequest, saveRequest],
   );
+
+  const closeTab = useCallback((id: string) => closeTabs([id]), [closeTabs]);
 
   const newRequest = useCallback(() => {
     createRequest(null);
@@ -603,6 +585,7 @@ export function HttpReqApp({ runtime, repository, history, desktop, version }: P
               unsavedIds={unsavedIds}
               onActivate={setActiveRequest}
               onClose={(id) => void closeTab(id)}
+              onCloseMany={(ids) => void closeTabs(ids)}
               onNew={newRequest}
               onMove={moveTab}
               newShortcut={shortcutLabel('request.new')}
