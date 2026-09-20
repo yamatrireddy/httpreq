@@ -384,7 +384,12 @@ export const RequestTabs = memo(function RequestTabs({
       </Menu>
 
       <div className={classes.spacer} />
-      {actions}
+      {/*
+       * The trailing controls are their own zone. Without it they would be flex children of the
+       * strip alongside the scrollable viewport, and a strip full of tabs would shrink them —
+       * the environment picker would collapse to a few unreadable pixels.
+       */}
+      {actions && <div className={classes.actions}>{actions}</div>}
 
       <TabContextMenu
         target={menu}

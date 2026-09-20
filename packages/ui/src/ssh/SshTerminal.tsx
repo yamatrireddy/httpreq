@@ -51,6 +51,8 @@ const LINE_HEIGHT = 1.2;
 
 interface SurfaceProps {
   sessionId: string;
+  /** Becomes true when the remote shell exists and can be told what size to be. */
+  connected: boolean;
 }
 
 /**
@@ -62,7 +64,7 @@ interface SurfaceProps {
  * changes identity whenever a host-key prompt appears, and rebuilding the terminal for that would
  * throw away the user's scrollback mid-session.
  */
-function TerminalSurface({ sessionId }: SurfaceProps) {
+function TerminalSurface({ sessionId, connected }: SurfaceProps) {
   const ssh = useSsh();
   const colorScheme = useComputedColorScheme('dark');
   const host = useRef<HTMLDivElement>(null);
@@ -72,6 +74,8 @@ function TerminalSurface({ sessionId }: SurfaceProps) {
   sshRef.current = ssh;
   const schemeRef = useRef(colorScheme);
   schemeRef.current = colorScheme;
+  /** The live terminal's size reporter, so the connect effect can call it without rebuilding. */
+  const reportRef = useRef<(() => void) | null>(null);
 
   useEffect(() => {
     const element = host.current;
@@ -92,7 +96,11 @@ function TerminalSurface({ sessionId }: SurfaceProps) {
     instance.open(element);
     terminal.current = instance;
 
-    /** Tells the remote pty the size the terminal actually laid out at. */
+    /**
+     * Tells the remote pty the size the terminal actually laid out at. Both the cell grid and
+     * the pixel box are sent: `cols`/`rows` are what a shell wraps and redraws against, and the
+     * pixel size is what a program drawing images or sixels asks the pty for.
+     */
     const report = () =>
       sshRef.current.resize(sessionId, {
         cols: instance.cols,
@@ -100,6 +108,7 @@ function TerminalSurface({ sessionId }: SurfaceProps) {
         width: element.clientWidth,
         height: element.clientHeight,
       });
+    reportRef.current = report;
 
     let frame = 0;
     const applyFit = () => {
@@ -152,11 +161,22 @@ function TerminalSurface({ sessionId }: SurfaceProps) {
       observer.disconnect();
       offData();
       onInput.dispose();
+      reportRef.current = null;
       // Disposing the terminal also disposes the addons it loaded and removes its DOM.
       instance.dispose();
       terminal.current = null;
     };
   }, [sessionId]);
+
+  /*
+   * The terminal lays out while the handshake is still running, so the size it first reported
+   * was measured before there was a shell to tell. Reporting again on connect is what stops a
+   * remote pty from staying at its default 80x24 under a wider xterm — the mismatch that makes a
+   * remote shell wrap early and redraw its prompt over its own output.
+   */
+  useEffect(() => {
+    if (connected) reportRef.current?.();
+  }, [connected]);
 
   // Only the palette changes with the theme; the terminal itself is never rebuilt for it.
   useEffect(() => {
@@ -244,7 +264,11 @@ export function SshTerminal({ sessionId }: Props) {
 
       {live ? (
         // Keyed on the generation: a reconnect disposes this terminal and builds a new one.
-        <TerminalSurface key={`${sessionId}:${session?.generation ?? 0}`} sessionId={sessionId} />
+        <TerminalSurface
+          key={`${sessionId}:${session?.generation ?? 0}`}
+          sessionId={sessionId}
+          connected={status === 'connected'}
+        />
       ) : (
         <div className={classes.idle}>
           <IconTerminal2 size={26} aria-hidden />

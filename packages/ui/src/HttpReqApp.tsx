@@ -1,6 +1,5 @@
 import {
   AppShell,
-  Box,
   Button,
   Center,
   Group,
@@ -59,11 +58,10 @@ import { Sidebar } from './explorer/Sidebar';
 import { LayoutToggle } from './LayoutToggle';
 import type { MenuDefinition } from './MenuBar';
 import { REQUEST_PANEL_ID, requestTabId } from './methods';
-import { DEFAULT_SPLIT_RATIO, usePreferences } from './preferences';
+import { usePreferences } from './preferences';
 import { RequestTabs, type TabItem } from './RequestTabs';
 import { ResponsePanel } from './ResponsePanel';
 import { formatChord } from './shortcuts';
-import { SplitPane } from './SplitPane';
 import { StatusBar } from './StatusBar';
 import { HostKeyDialog } from './ssh/HostKeyDialog';
 import { SshContext, useSshManager } from './ssh/useSsh';
@@ -72,6 +70,7 @@ import { activeEnvironment, editableRequest, requestKind, useWorkbenchStore } fr
 import { TunnelContext, useTunnelManager } from './tunnels/useTunnels';
 import { WebSocketContext, useWebSocketManager } from './websocket/useWebSockets';
 import { WebSocketEditor } from './websocket/WebSocketEditor';
+import { WorkbenchSplit } from './WorkbenchSplit';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { Z_LAYERS } from './zLayers';
 import { TitleBar } from './TitleBar';
@@ -230,8 +229,6 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   const setResponse = useWorkbenchStore((state) => state.setResponse);
 
   const responsePosition = usePreferences((state) => state.responsePosition);
-  const splitRatio = usePreferences((state) => state.splitRatio[state.responsePosition]);
-  const setSplitRatio = usePreferences((state) => state.setSplitRatio);
   const sidebarVisible = usePreferences((state) => state.sidebarVisible);
   const sidebarWidth = usePreferences((state) => state.sidebarWidth);
   const statusBarVisible = usePreferences((state) => state.statusBarVisible);
@@ -823,16 +820,32 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                       }
                     />
 
-                    {activeSshId && sshTabs.some((tab) => tab.id === activeSshId) ? (
-                      <div
-                        role="tabpanel"
-                        id={REQUEST_PANEL_ID}
-                        aria-labelledby={requestTabId(activeSshId)}
-                        className={classes.workspace}
-                      >
-                        <SshTerminal key={activeSshId} sessionId={activeSshId} />
-                      </div>
-                    ) : activeKind === 'websocket' && activeId ? (
+                    {/*
+                     * Every open terminal stays mounted and is merely hidden when its tab is not
+                     * the active one. A terminal is a live screen, not a view of stored data:
+                     * unmounting it would dispose the xterm instance and destroy the scrollback,
+                     * the prompt and whatever full-screen program is running, so coming back to a
+                     * still-connected session would show an empty pane.
+                     */}
+                    {sshTabs.map((tab) => {
+                      const active = tab.id === activeSshId;
+                      return (
+                        <div
+                          key={tab.id}
+                          role="tabpanel"
+                          id={active ? REQUEST_PANEL_ID : undefined}
+                          aria-labelledby={requestTabId(tab.id)}
+                          className={classes.workspace}
+                          hidden={!active}
+                        >
+                          <SshTerminal sessionId={tab.id} />
+                        </div>
+                      );
+                    })}
+
+                    {activeSshId &&
+                    sshTabs.some((tab) => tab.id === activeSshId) ? null : activeKind ===
+                        'websocket' && activeId ? (
                       <div
                         role="tabpanel"
                         id={REQUEST_PANEL_ID}
@@ -848,48 +861,32 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                         aria-labelledby={requestTabId(activeId)}
                         className={classes.workspace}
                       >
-                        <SplitPane
-                          layout={responsePosition}
-                          ratio={splitRatio}
-                          defaultRatio={DEFAULT_SPLIT_RATIO[responsePosition]}
-                          onRatioChange={(ratio) => setSplitRatio(responsePosition, ratio)}
-                          firstId="request-editor"
-                          label="Resize request and response panels"
-                          first={
-                            <section
-                              id="request-editor"
-                              aria-label="Request"
-                              className={classes.requestArea}
-                            >
-                              <RequestEditor
-                                key={activeId}
-                                requestId={activeId}
-                                desktop={!!desktop}
-                                sending={sending}
-                                onSend={() => void send()}
-                                onCancel={() => execution.cancel(activeId)}
-                                onSave={() => void saveActive()}
-                                urlRef={urlRef}
-                                buildCurl={buildCurl}
-                                shortcuts={{
-                                  send: shortcutLabel('request.send'),
-                                  save: shortcutLabel('request.save'),
-                                  focusUrl: shortcutLabel('request.focus-url'),
-                                }}
-                              />
-                            </section>
+                        <WorkbenchSplit
+                          ref={responseRef}
+                          requestId="request-editor"
+                          labels={{ request: 'Request', response: 'Response' }}
+                          splitterLabel="Resize request and response panels"
+                          busy={sending}
+                          request={
+                            <RequestEditor
+                              key={activeId}
+                              requestId={activeId}
+                              desktop={!!desktop}
+                              sending={sending}
+                              onSend={() => void send()}
+                              onCancel={() => execution.cancel(activeId)}
+                              onSave={() => void saveActive()}
+                              urlRef={urlRef}
+                              buildCurl={buildCurl}
+                              shortcuts={{
+                                send: shortcutLabel('request.send'),
+                                save: shortcutLabel('request.save'),
+                                focusUrl: shortcutLabel('request.focus-url'),
+                              }}
+                            />
                           }
-                          second={
-                            <Box
-                              component="section"
-                              ref={responseRef}
-                              tabIndex={-1}
-                              aria-label="Response"
-                              aria-busy={sending}
-                              className={classes.responseArea}
-                            >
-                              <ResponsePanel response={responses[activeId]} loading={sending} />
-                            </Box>
+                          response={
+                            <ResponsePanel response={responses[activeId]} loading={sending} />
                           }
                         />
                       </div>

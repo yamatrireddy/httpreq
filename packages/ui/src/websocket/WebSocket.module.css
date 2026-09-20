@@ -5,16 +5,19 @@
   min-height: 0;
 }
 
+/* Wraps rather than squeezing the controls: in the right-hand layout the configuration pane is
+   half the window, and the connection buttons must stay usable there. */
 .urlBar {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
   gap: 8px;
   padding: 8px 10px;
   border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 .url {
-  flex: 1;
+  flex: 1 1 220px;
   min-width: 0;
 }
 
@@ -72,15 +75,6 @@
   flex-direction: column;
   min-height: 0;
   height: 100%;
-}
-
-.messageHeader {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
-  gap: 8px;
-  padding: 6px 10px;
-  border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 .messageList {
@@ -167,5 +161,4 @@
 
 .empty {
   padding: 24px 12px;
-  text-align: center;
 }

@@ -47,10 +47,18 @@ export function usePersistence(
   /** The workspace the debounced writers belong to; a switch must not write to the old id. */
   const activeId = useRef<string>('');
 
+  /**
+   * Rereads the workspace index. The workspace in memory is always represented, even when the
+   * index read fails or comes back empty: an unreadable index must not make the switcher look as
+   * though the open workspace had been deleted.
+   */
   const refreshIndex = useCallback(
     async (fallback?: Workspace) => {
       const list = await repository.listWorkspaces().catch(() => [] as WorkspaceMeta[]);
-      const items = list.length || !fallback ? list : [workspaceMeta(fallback)];
+      const active = fallback ?? useWorkbenchStore.getState().workspace;
+      const items = list.some((item) => item.id === active.id)
+        ? list
+        : [...list, workspaceMeta(active)];
       useWorkbenchStore.getState().setWorkspaces(sortWorkspaces(items));
     },
     [repository],
@@ -260,21 +268,27 @@ export function usePersistence(
     [flushCurrent, refreshIndex, repository],
   );
 
+  /**
+   * Renames a workspace, in memory when it is the open one and on disk either way. A blank or
+   * whitespace-only name is not a rename: it is rejected here as well as in the dialog, so no
+   * caller can leave a workspace without a name to be found by.
+   */
   const rename = useCallback(
     async (id: string, name: string) => {
+      const trimmed = name.trim();
+      if (!trimmed) return;
       const store = useWorkbenchStore.getState();
       if (id === store.workspace.id) {
-        store.renameWorkspace(name);
+        store.renameWorkspace(trimmed);
+        // Written immediately rather than on the debounce: the name is what the switcher and the
+        // index are read by, and a reload between the two would show the old one.
         await writeWorkspace(useWorkbenchStore.getState().workspace).catch(() => undefined);
       } else {
         const workspace = await repository.getWorkspace(id);
-        const trimmed = name.trim();
-        if (!workspace || !trimmed) return;
-        await repository.saveWorkspace({
-          ...workspace,
-          name: trimmed,
-          updatedAt: new Date().toISOString(),
-        });
+        if (!workspace) return;
+        await repository
+          .saveWorkspace({ ...workspace, name: trimmed, updatedAt: new Date().toISOString() })
+          .catch(() => undefined);
       }
       await refreshIndex();
     },

@@ -15,8 +15,8 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
     <Select
       aria-label="Active environment"
       className={classes.select}
+      classNames={{ input: classes.input, option: classes.option }}
       size="xs"
-      w={170}
       mx={6}
       leftSection={<IconVariable size={14} />}
       value={activeId ?? NONE}
@@ -29,6 +29,9 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
       comboboxProps={{
         withinPortal: true,
         position: 'bottom-end',
+        // The list is free to be wider than the (deliberately narrow) control, so a long
+        // environment name can be read in full when choosing one.
+        width: 240,
         middlewares: { flip: true, shift: true },
       }}
     />

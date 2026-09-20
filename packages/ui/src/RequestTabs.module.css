@@ -50,6 +50,18 @@
   min-width: 8px;
 }
 
+/*
+ * Trailing controls (environment picker, layout toggle). `flex: 0 0 auto` with `min-width` from
+ * the content keeps them at their natural size: the tab viewport is the only part of the strip
+ * that gives up width, which is what makes the picker readable however many tabs are open.
+ */
+.actions {
+  display: flex;
+  align-items: stretch;
+  flex: 0 0 auto;
+  min-width: max-content;
+}
+
 /* ---- Tabs ------------------------------------------------------------------------------- */
 
 .tabWrapper {

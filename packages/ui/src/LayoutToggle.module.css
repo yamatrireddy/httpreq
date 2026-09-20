@@ -1,6 +1,9 @@
+/* Fixed-size icon buttons: the toggle never takes width from the environment picker beside it,
+   and never gives any up either. */
 .group {
   display: flex;
   align-items: stretch;
+  flex: none;
   border-left: 1px solid var(--mantine-color-default-border);
 }
 

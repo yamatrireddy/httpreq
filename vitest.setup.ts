@@ -15,4 +15,18 @@ if (typeof window !== 'undefined') {
       dispatchEvent: () => false,
     }),
   });
+
+  // jsdom has no ResizeObserver, and components that watch their own box (the terminal, the tab
+  // strip) construct one on mount. The stub never fires: a test that needs a resize drives the
+  // component directly rather than waiting for a layout jsdom does not perform.
+  if (!('ResizeObserver' in window)) {
+    Object.defineProperty(window, 'ResizeObserver', {
+      writable: true,
+      value: class {
+        observe() {}
+        unobserve() {}
+        disconnect() {}
+      },
+    });
+  }
 }
