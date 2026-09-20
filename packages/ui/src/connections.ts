@@ -37,6 +37,11 @@ export interface SshSessionState {
   status: SshStatus;
   error: SshErrorInfo | null;
   startedAt: string | null;
+  /**
+   * Incremented on every (re)connect. The terminal is keyed on it, so a reconnect always builds a
+   * new xterm instance instead of writing a second shell into the previous one's scrollback.
+   */
+  generation: number;
 }
 
 interface ConnectionsState {

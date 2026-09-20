@@ -29,6 +29,10 @@ import { activeEnvironment, useWorkbenchStore } from '../store';
  * and from then on the main process looks it up in the OS vault by the profile's `credentialId`.
  * Host and username may contain `{{variables}}`, which are resolved here, against the active
  * environment, before the profile crosses IPC.
+ *
+ * This hook also owns everything a terminal needs but cannot keep itself: the output that arrives
+ * before the terminal has mounted, the size the shell was last laid out at, and the generation
+ * that makes a reconnect build a fresh terminal rather than continue the previous one.
  */
 
 export interface PendingHostKey {
@@ -52,7 +56,11 @@ export interface SshApi {
   setCredential: (credentialId: string, secret: string) => Promise<boolean>;
   hasCredential: (credentialId: string) => Promise<boolean>;
   deleteCredential: (credentialId: string) => Promise<void>;
-  /** Subscribes to terminal output for one session. Returns an unsubscribe function. */
+  /**
+   * Subscribes to terminal output for one session. Output that arrived before the terminal was
+   * mounted is replayed to the first listener, so a shell's banner and first prompt are not lost
+   * in the gap between the session opening and xterm laying out. Returns an unsubscribe function.
+   */
   onData: (sessionId: string, listener: (data: string) => void) => () => void;
   /** The host-key question currently awaiting an answer, if any. */
   pendingHostKey: PendingHostKey | null;
@@ -80,6 +88,12 @@ export const resolveSshProfile = (profile: SshProfile): SshProfile => {
   };
 };
 
+/** Used until the terminal reports the size it actually laid out at. */
+const DEFAULT_SIZE: TerminalSize = { cols: 80, rows: 24, width: 640, height: 384 };
+
+/** Enough to hold a login banner and a prompt; a terminal that never mounts cannot grow a leak. */
+const MAX_BUFFERED_CHARS = 64 * 1024;
+
 const UNAVAILABLE: SshApi = {
   available: false,
   open: async () => null,
@@ -103,8 +117,19 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
   const [pendingHostKey, setPendingHostKey] = useState<PendingHostKey | null>(null);
   /** Terminal output listeners, one per mounted terminal. */
   const dataListeners = useRef(new Map<string, Set<(data: string) => void>>());
+  /** Output for sessions whose terminal has not mounted (or has been unmounted) yet. */
+  const pendingOutput = useRef(new Map<string, string>());
   /** The profile each session was opened with, so "Reconnect" needs no lookup. */
   const sessionProfiles = useRef(new Map<string, SshProfile>());
+  /** The size each terminal last laid out at, so a reconnect starts the shell at it. */
+  const sessionSizes = useRef(new Map<string, TerminalSize>());
+
+  /** Everything a session owns in this hook, dropped in one place. */
+  const forgetSessionResources = useCallback((sessionId: string) => {
+    pendingOutput.current.delete(sessionId);
+    sessionSizes.current.delete(sessionId);
+    sessionProfiles.current.delete(sessionId);
+  }, []);
 
   useEffect(() => {
     if (!bridge) return;
@@ -119,9 +144,22 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
               : {}),
           });
           break;
-        case 'data':
-          for (const listener of dataListeners.current.get(sessionId) ?? []) listener(event.data);
+        case 'data': {
+          const listeners = dataListeners.current.get(sessionId);
+          if (listeners?.size) {
+            for (const listener of listeners) listener(event.data);
+          } else {
+            // No terminal is mounted yet; keep the tail of the output for the one that will be.
+            const buffered = (pendingOutput.current.get(sessionId) ?? '') + event.data;
+            pendingOutput.current.set(
+              sessionId,
+              buffered.length > MAX_BUFFERED_CHARS
+                ? buffered.slice(buffered.length - MAX_BUFFERED_CHARS)
+                : buffered,
+            );
+          }
           break;
+        }
         case 'error':
           connections.patchSession(sessionId, { status: 'error', error: event.error });
           break;
@@ -149,6 +187,24 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
     [bridge],
   );
 
+  /** Starts a shell for a session that is already registered, at the size it was last laid out. */
+  const start = useCallback(
+    async (sessionId: string, profile: SshProfile) => {
+      if (!bridge) return;
+      const result = await bridge.connect({
+        sessionId,
+        profile: resolveSshProfile(profile),
+        size: sessionSizes.current.get(sessionId) ?? DEFAULT_SIZE,
+      });
+      if (!result.ok) {
+        useConnectionsStore
+          .getState()
+          .patchSession(sessionId, { status: 'error', error: result.error });
+      }
+    },
+    [bridge],
+  );
+
   const open = useCallback(
     async (profile: SshProfile) => {
       if (!bridge) return null;
@@ -161,30 +217,29 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
         status: 'connecting',
         error: null,
         startedAt: null,
+        generation: 1,
       });
       store.openSshSession(sessionId);
       sessionProfiles.current.set(sessionId, profile);
+      pendingOutput.current.delete(sessionId);
 
-      // A sensible starting size; the terminal sends its real one as soon as it has laid out.
-      const result = await bridge.connect({
-        sessionId,
-        profile: resolveSshProfile(profile),
-        size: { cols: 80, rows: 24, width: 640, height: 384 },
-      });
-      if (!result.ok) {
-        useConnectionsStore
-          .getState()
-          .patchSession(sessionId, { status: 'error', error: result.error });
-      }
+      await start(sessionId, profile);
       return sessionId;
     },
-    [bridge],
+    [bridge, start],
   );
 
+  /**
+   * Ends the shell and clears everything that belonged to it, so the view falls back to its
+   * disconnected state and the next connection cannot inherit this one's output.
+   */
   const disconnect = useCallback(
     async (sessionId: string) => {
       await bridge?.disconnect(sessionId);
-      useConnectionsStore.getState().patchSession(sessionId, { status: 'disconnected' });
+      pendingOutput.current.delete(sessionId);
+      useConnectionsStore
+        .getState()
+        .patchSession(sessionId, { status: 'disconnected', startedAt: null });
     },
     [bridge],
   );
@@ -192,11 +247,11 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
   const close = useCallback(
     async (sessionId: string) => {
       await disconnect(sessionId);
-      sessionProfiles.current.delete(sessionId);
+      forgetSessionResources(sessionId);
       useConnectionsStore.getState().forgetSession(sessionId);
       useWorkbenchStore.getState().closeSshSession(sessionId);
     },
-    [disconnect],
+    [disconnect, forgetSessionResources],
   );
 
   const reconnect = useCallback(
@@ -204,19 +259,19 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
       const profile = sessionProfiles.current.get(sessionId);
       if (!bridge || !profile) return;
       await bridge.disconnect(sessionId);
-      useConnectionsStore.getState().patchSession(sessionId, { status: 'connecting', error: null });
-      const result = await bridge.connect({
-        sessionId,
-        profile: resolveSshProfile(profile),
-        size: { cols: 80, rows: 24, width: 640, height: 384 },
+      // The generation retires the previous terminal: the new shell starts on a clean screen.
+      const connections = useConnectionsStore.getState();
+      const previous = connections.sessions[sessionId];
+      pendingOutput.current.delete(sessionId);
+      connections.patchSession(sessionId, {
+        status: 'connecting',
+        error: null,
+        startedAt: null,
+        generation: (previous?.generation ?? 0) + 1,
       });
-      if (!result.ok) {
-        useConnectionsStore
-          .getState()
-          .patchSession(sessionId, { status: 'error', error: result.error });
-      }
+      await start(sessionId, profile);
     },
-    [bridge],
+    [bridge, start],
   );
 
   const test = useCallback(
@@ -236,10 +291,23 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
     [bridge],
   );
 
+  const resize = useCallback(
+    (sessionId: string, size: TerminalSize) => {
+      sessionSizes.current.set(sessionId, size);
+      bridge?.resize(sessionId, size);
+    },
+    [bridge],
+  );
+
   const onData = useCallback((sessionId: string, listener: (data: string) => void) => {
     const listeners = dataListeners.current.get(sessionId) ?? new Set();
     listeners.add(listener);
     dataListeners.current.set(sessionId, listeners);
+    const buffered = pendingOutput.current.get(sessionId);
+    if (buffered) {
+      pendingOutput.current.delete(sessionId);
+      listener(buffered);
+    }
     return () => {
       listeners.delete(listener);
       if (listeners.size === 0) dataListeners.current.delete(sessionId);
@@ -250,6 +318,8 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
     if (!bridge) return;
     const ids = [...sessionProfiles.current.keys()];
     sessionProfiles.current.clear();
+    sessionSizes.current.clear();
+    pendingOutput.current.clear();
     await Promise.all(ids.map((id) => bridge.disconnect(id).catch(() => undefined)));
   }, [bridge]);
 
@@ -262,7 +332,7 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
       close,
       reconnect,
       write: (sessionId, data) => bridge.write(sessionId, data),
-      resize: (sessionId, size) => bridge.resize(sessionId, size),
+      resize,
       test,
       pickPrivateKey: () => bridge.pickPrivateKey(),
       setCredential: (credentialId, secret) => bridge.setCredential({ credentialId, secret }),
@@ -279,6 +349,7 @@ export function useSshManager(bridge: SshBridge | undefined): SshApi {
     disconnect,
     close,
     reconnect,
+    resize,
     test,
     onData,
     pendingHostKey,

@@ -1,9 +1,12 @@
+/* Sized to the name it holds, up to a cap, and free to shrink further when the bar is narrow:
+   the centre zone gives way to the controls on either side before anything can overlap. */
 .trigger {
   display: inline-flex;
   align-items: center;
   gap: 6px;
   height: 24px;
-  max-width: 220px;
+  min-width: 0;
+  max-width: min(260px, 100%);
   padding: 0 8px;
   border-radius: var(--mantine-radius-sm);
   font-size: var(--mantine-font-size-xs);
@@ -22,6 +25,7 @@
 }
 
 .name {
+  min-width: 0;
   overflow: hidden;
   text-overflow: ellipsis;
   white-space: nowrap;

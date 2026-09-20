@@ -24,6 +24,8 @@ import {
   type TunnelType,
 } from '@httpreq/shared';
 import { VariableInput } from '../editor/VariableInput';
+import { yieldToHostKeyPrompt } from '../ssh/hostKeyPrompt';
+import { useSsh } from '../ssh/useSsh';
 import { useWorkbenchStore } from '../store';
 import { useTunnels } from './useTunnels';
 
@@ -51,6 +53,7 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
   const sshProfiles = useWorkbenchStore((state) => state.workspace.sshProfiles);
   const update = useWorkbenchStore((state) => state.updateTunnelProfile);
   const tunnels = useTunnels();
+  const ssh = useSsh();
 
   const [draft, setDraft] = useState<TunnelProfile | null>(null);
   const [showErrors, setShowErrors] = useState(false);
@@ -109,7 +112,15 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
   };
 
   return (
-    <Modal opened onClose={onClose} title="SSH tunnel" size="lg" centered>
+    <Modal
+      opened
+      onClose={onClose}
+      title="SSH tunnel"
+      size="lg"
+      centered
+      // Starting a tunnel can raise the host-key question, which has to be answered first.
+      {...yieldToHostKeyPrompt(!!ssh.pendingHostKey)}
+    >
       <Stack gap="sm">
         <TextInput
           label="Tunnel name"

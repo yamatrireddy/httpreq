@@ -3,6 +3,7 @@ import { useCallback, useEffect, useMemo, useRef } from 'react';
 import { notifications } from '@mantine/notifications';
 import {
   AppError,
+  DEFAULT_WEBSOCKET_SETTINGS,
   type WebSocketConnection,
   type WebSocketPayloadType,
   type WebSocketRequest,
@@ -17,6 +18,11 @@ import { byteLength, frameMessage, systemMessage, useConnectionsStore } from '..
  * Connections are keyed by the saved request's id, so a tab always shows its own socket and
  * closing a tab closes exactly one connection. Everything the UI needs — status, protocol and
  * message log — lives in the connections store; this hook only performs the side effects.
+ *
+ * Every attempt carries a generation number. Closing a socket is asynchronous — a browser socket
+ * delivers its `close` long after `close()` returns — so without one the dying socket's events
+ * would land on the connection that replaced it: a reconnect would report itself as disconnected,
+ * and an automatic reconnect could be scheduled for a socket the user had already closed.
  */
 
 export interface WebSocketApi {
@@ -25,6 +31,8 @@ export interface WebSocketApi {
   reconnect: (request: WebSocketRequest) => Promise<void>;
   send: (request: WebSocketRequest, payloadType: WebSocketPayloadType, data: string) => void;
   clear: (requestId: string) => void;
+  /** Closes the socket and drops its log; used when a WebSocket tab is closed. */
+  forget: (requestId: string) => void;
   /** Closes every socket and forgets it. Used when the workspace changes or the app unmounts. */
   closeAll: () => void;
   isConnected: (requestId: string) => boolean;
@@ -44,6 +52,15 @@ const encodePayload = (payloadType: WebSocketPayloadType, data: string) =>
     ? ({ kind: 'binary', data: hexToBytes(data) } as const)
     : ({ kind: 'text', data } as const);
 
+/** Closes a connection without letting one failure stop the rest of a teardown. */
+const closeQuietly = (connection: WebSocketConnection, code: number, reason: string) => {
+  try {
+    connection.close(code, reason);
+  } catch {
+    // Already gone; there is nothing left to release.
+  }
+};
+
 export function useWebSocketManager(
   runtime: WebSocketRuntime,
   context: () => PipelineContext,
@@ -51,6 +68,10 @@ export function useWebSocketManager(
   const connections = useRef(new Map<string, WebSocketConnection>());
   /** Pending automatic reconnects, so a manual disconnect can cancel one. */
   const reconnectTimers = useRef(new Map<string, ReturnType<typeof setTimeout>>());
+  /** Current attempt per request; anything older is a socket on its way out. */
+  const generations = useRef(new Map<string, number>());
+  /** Message limit each socket was opened with, for logging without the request to hand. */
+  const messageLimits = useRef(new Map<string, number>());
 
   const store = useConnectionsStore;
 
@@ -62,9 +83,28 @@ export function useWebSocketManager(
     }
   }, []);
 
+  /** Starts a new attempt and invalidates every event still in flight for the previous one. */
+  const nextGeneration = useCallback((requestId: string) => {
+    const generation = (generations.current.get(requestId) ?? 0) + 1;
+    generations.current.set(requestId, generation);
+    return generation;
+  }, []);
+
   const log = useCallback(
     (request: WebSocketRequest, message: ReturnType<typeof systemMessage>) =>
       store.getState().addSocketMessage(request.id, message, request.settings.messageLimit),
+    [store],
+  );
+
+  const logById = useCallback(
+    (requestId: string, message: ReturnType<typeof systemMessage>) =>
+      store
+        .getState()
+        .addSocketMessage(
+          requestId,
+          message,
+          messageLimits.current.get(requestId) ?? DEFAULT_WEBSOCKET_SETTINGS.messageLimit,
+        ),
     [store],
   );
 
@@ -74,21 +114,29 @@ export function useWebSocketManager(
       cancelReconnect(request.id);
       if (connections.current.has(request.id)) return;
 
+      const generation = nextGeneration(request.id);
+      const isCurrent = () => generations.current.get(request.id) === generation;
+      messageLimits.current.set(request.id, request.settings.messageLimit);
+
       state.setSocketStatus(request.id, 'connecting', { error: null });
       let built;
       try {
         built = await buildWebSocket(request, context(), runtime.supportsHeaders);
       } catch (error) {
+        if (!isCurrent()) return;
         const message =
           error instanceof AppError ? error.message : 'The request could not be prepared.';
         store.getState().setSocketStatus(request.id, 'error', { error: message });
         log(request, systemMessage(message, true));
         return;
       }
+      if (!isCurrent()) return;
       for (const warning of built.warnings) log(request, systemMessage(warning));
 
       try {
         const connection = await runtime.connect(built.prepared, (event) => {
+          // An event from a socket the user has already replaced or closed.
+          if (!isCurrent()) return;
           const current = store.getState();
           switch (event.type) {
             case 'open':
@@ -137,7 +185,8 @@ export function useWebSocketManager(
                   request.id,
                   setTimeout(() => {
                     reconnectTimers.current.delete(request.id);
-                    void connect(request);
+                    // The timer outlives this generation, so the check is repeated on waking.
+                    if (isCurrent()) void connect(request);
                   }, request.settings.reconnectDelayMs),
                 );
               }
@@ -145,35 +194,43 @@ export function useWebSocketManager(
             }
           }
         });
+        // The user disconnected, or switched workspace, while the handshake was in flight: the
+        // socket is live but nothing owns it any more, so it is closed rather than registered.
+        if (!isCurrent()) {
+          closeQuietly(connection, 1000, 'Closed by the user');
+          return;
+        }
         connections.current.set(request.id, connection);
       } catch (error) {
+        if (!isCurrent()) return;
         const message =
           error instanceof AppError ? error.message : 'The WebSocket connection failed.';
         store.getState().setSocketStatus(request.id, 'error', { error: message });
         log(request, systemMessage(message, true));
       }
     },
-    [cancelReconnect, context, log, runtime, store],
+    [cancelReconnect, context, log, nextGeneration, runtime, store],
   );
 
   const disconnect = useCallback(
     (requestId: string) => {
       cancelReconnect(requestId);
       const connection = connections.current.get(requestId);
-      if (!connection) {
-        store.getState().setSocketStatus(requestId, 'disconnected');
-        return;
-      }
-      store.getState().setSocketStatus(requestId, 'disconnecting');
+      const pending = !connection && generations.current.has(requestId);
+      // The socket is retired first: its `close` is asynchronous and must not reach the next one.
+      nextGeneration(requestId);
       connections.current.delete(requestId);
-      try {
-        connection.close(1000, 'Closed by the user');
-      } catch {
-        // Already gone; the close event has done the bookkeeping.
+      if (connection) {
+        store.getState().setSocketStatus(requestId, 'disconnecting');
+        closeQuietly(connection, 1000, 'Closed by the user');
+        logById(requestId, systemMessage('Disconnected by the user.'));
+      } else if (pending) {
+        // A handshake still in flight; `connect` discards the socket when it finally resolves.
+        logById(requestId, systemMessage('Connection cancelled.'));
       }
       store.getState().setSocketStatus(requestId, 'disconnected');
     },
-    [cancelReconnect, store],
+    [cancelReconnect, logById, nextGeneration, store],
   );
 
   const reconnect = useCallback(
@@ -230,18 +287,28 @@ export function useWebSocketManager(
     [store],
   );
 
+  const forget = useCallback(
+    (requestId: string) => {
+      disconnect(requestId);
+      generations.current.delete(requestId);
+      messageLimits.current.delete(requestId);
+      store.getState().forgetSocket(requestId);
+    },
+    [disconnect, store],
+  );
+
   const closeAll = useCallback(() => {
     for (const timer of reconnectTimers.current.values()) clearTimeout(timer);
     reconnectTimers.current.clear();
+    // Every attempt is retired, including handshakes that have not resolved yet, so no late
+    // event can write to the store after the workspace it belonged to has been torn down.
+    for (const requestId of [...generations.current.keys()]) nextGeneration(requestId);
     for (const connection of connections.current.values()) {
-      try {
-        connection.close(1001, 'HttpReq is closing the connection');
-      } catch {
-        // Nothing left to close.
-      }
+      closeQuietly(connection, 1001, 'HttpReq is closing the connection');
     }
     connections.current.clear();
-  }, []);
+    messageLimits.current.clear();
+  }, [nextGeneration]);
 
   const isConnected = useCallback((requestId: string) => connections.current.has(requestId), []);
 
@@ -249,7 +316,7 @@ export function useWebSocketManager(
   useEffect(() => closeAll, [closeAll]);
 
   return useMemo(
-    () => ({ connect, disconnect, reconnect, send, clear, closeAll, isConnected }),
-    [connect, disconnect, reconnect, send, clear, closeAll, isConnected],
+    () => ({ connect, disconnect, reconnect, send, clear, forget, closeAll, isConnected }),
+    [connect, disconnect, reconnect, send, clear, forget, closeAll, isConnected],
   );
 }

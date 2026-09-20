@@ -1,7 +1,13 @@
 import { Button, Group, Modal, Text } from '@mantine/core';
 import { settleConfirm, useConfirmStore } from './confirm';
+import { Z_LAYERS } from './zLayers';
 
-/** Renders the pending `confirmAction` request, if any. */
+/**
+ * Renders the pending `confirmAction` request, if any.
+ *
+ * A confirmation is often raised from inside another dialog, so it takes its own layer rather
+ * than relying on which portal happens to be later in the DOM.
+ */
 export function ConfirmDialog() {
   const request = useConfirmStore((state) => state.request);
   return (
@@ -10,6 +16,7 @@ export function ConfirmDialog() {
       onClose={() => settleConfirm('cancel')}
       title={request?.title}
       size="sm"
+      zIndex={Z_LAYERS.confirm}
       centered
     >
       {request && (

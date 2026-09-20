@@ -88,6 +88,7 @@ describe('activeConnectionCounts', () => {
       status: 'connected',
       error: null,
       startedAt: null,
+      generation: 1,
     });
     store().setSession({
       sessionId: 'x2',
@@ -96,6 +97,7 @@ describe('activeConnectionCounts', () => {
       status: 'disconnected',
       error: null,
       startedAt: null,
+      generation: 1,
     });
     store().setTunnelState(tunnelState('t1', 'active'));
     store().setTunnelState(tunnelState('t2', 'error'));
@@ -129,6 +131,7 @@ describe('session and tunnel bookkeeping', () => {
       status: 'connecting',
       error: null,
       startedAt: null,
+      generation: 1,
     });
     store().patchSession('x1', { status: 'connected' });
     expect(store().sessions.x1).toMatchObject({ status: 'connected', name: 'Prod' });

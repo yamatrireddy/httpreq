@@ -107,11 +107,14 @@ export function WorkspaceSwitcher({ actions, releaseConnections }: Props) {
 
   return (
     <>
-      <Menu position="bottom-start" shadow="md" width={280} withinPortal>
+      {/* Centred under the trigger, which sits in the middle of the title bar. */}
+      <Menu position="bottom" shadow="md" width={280} withinPortal>
         <Menu.Target>
           <UnstyledButton
             className={classes.trigger}
             aria-label={`Workspace: ${current.name}. Select to switch workspace.`}
+            // A name too long for the bar is truncated, so the full one stays readable on hover.
+            title={current.name}
             disabled={switching}
           >
             <IconStack2 size={14} aria-hidden />

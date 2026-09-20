@@ -73,6 +73,7 @@ import { TunnelContext, useTunnelManager } from './tunnels/useTunnels';
 import { WebSocketContext, useWebSocketManager } from './websocket/useWebSockets';
 import { WebSocketEditor } from './websocket/WebSocketEditor';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
+import { Z_LAYERS } from './zLayers';
 import { TitleBar } from './TitleBar';
 import { usePersistence } from './usePersistence';
 import { useRequestExecution } from './useRequestExecution';
@@ -463,9 +464,10 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
       const wanted = [...ids];
       const sshIds = wanted.filter((id) => state.openSshSessionIds.includes(id));
       const requestIds = wanted.filter((id) => !state.openSshSessionIds.includes(id));
-      // A closed WebSocket tab must not leave its socket open.
+      // A closed WebSocket tab must not leave its socket open, nor its message log behind for
+      // the next time the same request is opened.
       for (const id of requestIds) {
-        if (requestKind(state.workspace, id) === 'websocket') sockets.disconnect(id);
+        if (requestKind(state.workspace, id) === 'websocket') sockets.forget(id);
       }
       if (requestIds.length) {
         await closeRequestTabs(requestIds, { saveRequest, cancelRequest });
@@ -775,11 +777,13 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                   padding={0}
                   transitionDuration={120}
                 >
-                  {/* Above the navbar (101) so menus drop down over the sidebar; below modals (200). */}
-                  <AppShell.Header className={classes.header} zIndex={150}>
+                  {/* Above the navbar (101) so menus drop down over the sidebar; below dialogs. */}
+                  <AppShell.Header className={classes.header} zIndex={Z_LAYERS.header}>
                     <TitleBar
-                      title={activeName ? `${activeName} — ${workspaceName}` : workspaceName}
-                      leading={
+                      // The workspace name is the centred switcher's job, so the title bar's own
+                      // text is just whatever tab is open.
+                      title={activeName ?? ''}
+                      center={
                         <WorkspaceSwitcher
                           actions={workspaceActions}
                           releaseConnections={releaseConnections}

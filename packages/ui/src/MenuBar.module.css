@@ -1,8 +1,10 @@
+/* The buttons inside are nowrap and do not shrink, so the bar keeps its natural width rather
+   than being squeezed into one its labels would overflow. */
 .menubar {
   display: flex;
   align-items: stretch;
   height: 100%;
-  min-width: 0;
+  flex: none;
   -webkit-app-region: no-drag;
 }
 
