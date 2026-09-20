@@ -1,5 +1,27 @@
-/* The tab strip stretches its children to the full bar height; the xs input keeps its own
-   height, so centre the root or the control sits against the top border. */
+/*
+ * The picker sizes itself, rather than being sized by whatever is left over in the tab strip.
+ * `flex: none` opts out of the strip's shrinking entirely, and the width clamps between a floor
+ * that keeps a name readable and a ceiling that leaves the tabs their space; `vw` in the middle
+ * term is what makes it give ground gradually on a narrow window instead of at one breakpoint.
+ */
 .select {
   align-self: center;
+  flex: none;
+  /* The tab strip stretches its children to the full bar height; the xs input keeps its own
+     height, so centre the root or the control sits against the top border. */
+  width: clamp(124px, 16vw, 190px);
+}
+
+/* A long environment name is truncated rather than allowed to widen or wrap the control. */
+.input {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
+}
+
+/* Dropdown rows are as wide as the dropdown, so the full name is readable when it is open. */
+.option {
+  overflow: hidden;
+  white-space: nowrap;
+  text-overflow: ellipsis;
 }

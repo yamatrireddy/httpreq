@@ -35,7 +35,7 @@ import { emptySocket, useConnectionsStore } from '../connections';
 import { CodeEditor } from '../editor/CodeEditor';
 import { KeyValueTable } from '../editor/KeyValueTable';
 import { VariableInput } from '../editor/VariableInput';
-import { SplitPane } from '../SplitPane';
+import { WorkbenchSplit } from '../WorkbenchSplit';
 import { useWorkbenchStore } from '../store';
 import { MessageList } from './MessageList';
 import { useWebSocketApi } from './useWebSockets';
@@ -64,9 +64,6 @@ const PLACEHOLDER: Record<WebSocketPayloadType, string> = {
   binary: 'Hexadecimal bytes, e.g. 48 65 6c 6c 6f',
 };
 
-/** Share of the panel given to the configuration, leaving the rest for the message log. */
-const DEFAULT_RATIO = 0.55;
-
 interface Props {
   requestId: string;
 }
@@ -86,8 +83,6 @@ export function WebSocketEditor({ requestId }: Props) {
   const api = useWebSocketApi();
   const capabilities = useCapabilities();
   const [tab, setTab] = useState<string | null>('params');
-  // Local to the tab: the log/configuration split is a per-socket reading preference.
-  const [ratio, setRatio] = useState(DEFAULT_RATIO);
 
   const inherited = useMemo(
     () => resolveInheritedAuth(workspace, request?.parentId ?? null),
@@ -112,15 +107,13 @@ export function WebSocketEditor({ requestId }: Props) {
   const send = () => api.send(request, request.draftPayloadType, request.draftMessage);
 
   return (
-    <SplitPane
-      layout="bottom"
-      ratio={ratio}
-      defaultRatio={DEFAULT_RATIO}
-      onRatioChange={setRatio}
-      firstId="websocket-config"
-      label="Resize the WebSocket configuration and message log"
-      first={
-        <div className={classes.panel} id="websocket-config">
+    <WorkbenchSplit
+      requestId="websocket-config"
+      labels={{ request: 'WebSocket request', response: 'WebSocket messages' }}
+      splitterLabel="Resize the WebSocket configuration and message log"
+      busy={busy}
+      request={
+        <div className={classes.panel}>
           <div className={classes.urlBar}>
             <Text size="xs" fw={700} c="violet" aria-hidden>
               WS
@@ -330,9 +323,13 @@ export function WebSocketEditor({ requestId }: Props) {
           </Tabs>
         </div>
       }
-      second={
+      response={
         <div className={classes.panel}>
-          <MessageList messages={socket.messages} onClear={() => api.clear(requestId)} />
+          <MessageList
+            messages={socket.messages}
+            status={status}
+            onClear={() => api.clear(requestId)}
+          />
           <div className={classes.composer}>
             <div className={classes.composerRow}>
               <SegmentedControl

@@ -49,6 +49,12 @@
   min-width: 0;
 }
 
+/* A terminal whose tab is not selected keeps running, off screen: `display: none` also makes it
+   measure as zero, which the terminal already treats as "do not fit yet". */
+.workspace[hidden] {
+  display: none;
+}
+
 .requestArea {
   display: flex;
   flex-direction: column;

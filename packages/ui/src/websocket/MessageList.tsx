@@ -1,8 +1,20 @@
-import { ActionIcon, Badge, Group, Text, Tooltip, VisuallyHidden } from '@mantine/core';
-import { IconTrash } from '@tabler/icons-react';
+import {
+  ActionIcon,
+  Badge,
+  Center,
+  Group,
+  Loader,
+  Stack,
+  Text,
+  ThemeIcon,
+  Tooltip,
+  VisuallyHidden,
+} from '@mantine/core';
+import { IconPlugConnected, IconTrash } from '@tabler/icons-react';
 import { memo, useEffect, useRef, useState } from 'react';
-import type { WebSocketMessage } from '@httpreq/shared';
+import type { WebSocketMessage, WebSocketStatus } from '@httpreq/shared';
 import { formatSize } from '../format';
+import { PaneHeader } from '../WorkbenchSplit';
 import classes from './WebSocket.module.css';
 
 const formatTime = (timestamp: string) => {
@@ -26,6 +38,8 @@ const LABEL: Record<WebSocketMessage['direction'], string> = {
 
 interface Props {
   messages: readonly WebSocketMessage[];
+  /** Drives the empty state, which says why there is nothing to read yet. */
+  status: WebSocketStatus;
   onClear: () => void;
 }
 
@@ -33,7 +47,7 @@ interface Props {
  * The connection's message history, oldest first. It follows new messages automatically, but
  * stops doing so as soon as the user scrolls up to read something, and resumes at the bottom.
  */
-export const MessageList = memo(function MessageList({ messages, onClear }: Props) {
+export const MessageList = memo(function MessageList({ messages, status, onClear }: Props) {
   const viewport = useRef<HTMLDivElement>(null);
   const [follow, setFollow] = useState(true);
 
@@ -54,7 +68,7 @@ export const MessageList = memo(function MessageList({ messages, onClear }: Prop
 
   return (
     <div className={classes.messages}>
-      <div className={classes.messageHeader}>
+      <PaneHeader aria-label="Message log">
         <Group gap="xs">
           <Text size="xs" fw={600}>
             Messages
@@ -80,7 +94,7 @@ export const MessageList = memo(function MessageList({ messages, onClear }: Prop
             <IconTrash size={14} />
           </ActionIcon>
         </Tooltip>
-      </div>
+      </PaneHeader>
 
       <div
         ref={viewport}
@@ -92,9 +106,27 @@ export const MessageList = memo(function MessageList({ messages, onClear }: Prop
         tabIndex={0}
       >
         {messages.length === 0 ? (
-          <Text className={classes.empty} size="sm" c="dimmed">
-            No messages yet. Connect, then send one.
-          </Text>
+          // The same shape as the HTTP response panel's empty state, so both kinds of request
+          // read the same way before anything has arrived.
+          <Center h="100%" className={classes.empty}>
+            <Stack align="center" gap="xs">
+              <ThemeIcon variant="light" size={44} radius="xl">
+                {status === 'connecting' ? <Loader size="sm" /> : <IconPlugConnected size={22} />}
+              </ThemeIcon>
+              <Text fw={600}>
+                {status === 'connecting'
+                  ? 'Connecting…'
+                  : status === 'connected'
+                    ? 'Connected — no messages yet'
+                    : 'Messages will appear here'}
+              </Text>
+              <Text size="sm" c="dimmed">
+                {status === 'connected'
+                  ? 'Send a message, or wait for the server to push one.'
+                  : 'Enter a URL and select Connect.'}
+              </Text>
+            </Stack>
+          </Center>
         ) : (
           messages.map((message) => (
             <div

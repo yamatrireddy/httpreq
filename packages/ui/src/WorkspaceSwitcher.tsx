@@ -18,6 +18,15 @@ import { useWorkbenchStore } from './store';
 import type { WorkspaceActions } from './usePersistence';
 import classes from './WorkspaceSwitcher.module.css';
 
+interface RenameState {
+  id: string;
+  /** The name to restore when the rename is abandoned. */
+  previous: string;
+  value: string;
+  /** Set once the user has edited the field, so the dialog does not open showing an error. */
+  touched?: boolean;
+}
+
 interface Props {
   actions: WorkspaceActions;
   /** Closes every live connection the current workspace owns, before it is swapped out. */
@@ -37,7 +46,13 @@ export function WorkspaceSwitcher({ actions, releaseConnections }: Props) {
   const switching = useWorkbenchStore((state) => state.switching);
   // Shallow-compared: the selector derives a fresh object, so it needs a stable comparison.
   const counts = useConnectionsStore(useShallow(activeConnectionCounts));
-  const [renaming, setRenaming] = useState<{ id: string; name: string } | null>(null);
+  /**
+   * The open rename dialog. `previous` is the name to fall back to, so cancelling — or leaving
+   * the field blank — can always restore a valid name rather than losing the workspace's own.
+   */
+  const [renaming, setRenaming] = useState<RenameState | null>(null);
+
+  const blankName = !!renaming?.touched && !renaming.value.trim();
 
   /** True when it is safe to proceed: nothing is running, or the user said to close it. */
   const confirmTeardown = async (verb: string): Promise<boolean> => {
@@ -98,12 +113,24 @@ export function WorkspaceSwitcher({ actions, releaseConnections }: Props) {
     await actions.remove(id);
   };
 
+  /**
+   * Applies the rename. A blank or whitespace-only name is refused in place — the dialog stays
+   * open with the error — because silently closing it would look like the name had been erased.
+   */
   const commitRename = async () => {
     if (!renaming) return;
-    const { id, name } = renaming;
+    const { id, value, previous } = renaming;
+    const name = value.trim();
+    if (!name) {
+      setRenaming({ id, previous, value: '', touched: true });
+      return;
+    }
     setRenaming(null);
-    if (name.trim()) await actions.rename(id, name);
+    if (name !== previous) await actions.rename(id, name);
   };
+
+  /** Escape, the close button, the overlay: the workspace keeps the name it already had. */
+  const cancelRename = () => setRenaming(null);
 
   return (
     <>
@@ -149,7 +176,9 @@ export function WorkspaceSwitcher({ actions, releaseConnections }: Props) {
           <Menu.Label>“{current.name}”</Menu.Label>
           <Menu.Item
             leftSection={<IconPencil size={14} />}
-            onClick={() => setRenaming({ id: current.id, name: current.name })}
+            onClick={() =>
+              setRenaming({ id: current.id, previous: current.name, value: current.name })
+            }
           >
             Rename…
           </Menu.Item>
@@ -171,32 +200,42 @@ export function WorkspaceSwitcher({ actions, releaseConnections }: Props) {
         </Menu.Dropdown>
       </Menu>
 
-      <Modal
-        opened={!!renaming}
-        onClose={() => setRenaming(null)}
-        title="Rename workspace"
-        centered
-        size="sm"
-      >
+      <Modal opened={!!renaming} onClose={cancelRename} title="Rename workspace" centered size="sm">
         <Stack gap="sm">
           <TextInput
             label="Name"
             data-autofocus
-            value={renaming?.name ?? ''}
-            onChange={(event) =>
+            value={renaming?.value ?? ''}
+            error={blankName ? 'Enter a name for the workspace.' : null}
+            onChange={(event) => {
+              // Read out of the event before the updater runs: React clears `currentTarget` as
+              // soon as the handler returns, and a lazy updater would then read it as null and
+              // take the whole application down with it.
+              const value = event.currentTarget.value;
+              setRenaming((state) => (state ? { ...state, value, touched: true } : state));
+            }}
+            onBlur={() =>
+              // Never leave the field empty behind the user: put the current name back so the
+              // dialog always shows something valid to accept.
               setRenaming((state) =>
-                state ? { ...state, name: event.currentTarget.value } : state,
+                state && !state.value.trim() ? { ...state, value: state.previous } : state,
               )
             }
             onKeyDown={(event) => {
-              if (event.key === 'Enter') void commitRename();
+              if (event.key === 'Enter') {
+                event.preventDefault();
+                void commitRename();
+              }
+              if (event.key === 'Escape') cancelRename();
             }}
           />
           <Text size="xs" c="dimmed">
             Requests, environments and connection profiles keep their identifiers, so nothing breaks
             when a workspace is renamed.
           </Text>
-          <Button onClick={() => void commitRename()}>Rename</Button>
+          <Button disabled={blankName} onClick={() => void commitRename()}>
+            Rename
+          </Button>
         </Stack>
       </Modal>
     </>

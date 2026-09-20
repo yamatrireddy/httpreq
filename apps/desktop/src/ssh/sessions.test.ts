@@ -24,15 +24,32 @@ const clientKey = utils.generateKeyPairSync('ed25519');
 const hostKey = utils.generateKeyPairSync('ed25519');
 const clientPublicKey = utils.parseKey(clientKey.public);
 
+/** The pty geometry the client asked for, in the order the server was told about it. */
+interface PtyRequest {
+  cols: number;
+  rows: number;
+  width: number;
+  height: number;
+  term: string;
+}
+
 interface TestServer {
   port: number;
   close: () => Promise<void>;
   /** Connections the server has accepted, for asserting that a disconnect really disconnected. */
   readonly live: number;
+  /** The pty the shell was opened with, then every window change, newest last. */
+  readonly ptys: PtyRequest[];
+  /** Writes raw bytes down the shell channel, for testing how output is decoded. */
+  writeRaw: (chunk: Buffer) => void;
 }
 
-const startServer = async (options: { authDelayMs?: number } = {}): Promise<TestServer> => {
+const startServer = async (
+  options: { authDelayMs?: number; shellDelayMs?: number } = {},
+): Promise<TestServer> => {
   let live = 0;
+  const ptys: PtyRequest[] = [];
+  let shellStream: { write: (chunk: string | Buffer) => void } | null = null;
   const server = new Server({ hostKeys: [hostKey.private] }, (client: Connection) => {
     live += 1;
     client.on('close', () => {
@@ -72,13 +89,38 @@ const startServer = async (options: { authDelayMs?: number } = {}): Promise<Test
     client.on('ready', () => {
       client.on('session', (acceptSession) => {
         const session = acceptSession();
-        session.on('pty', (accept) => accept?.());
-        session.on('window-change', (accept) => accept?.());
+        // The geometry is recorded rather than merely accepted: a remote shell renders against
+        // what it was told here, so the tests assert on it directly.
+        session.on('pty', (accept, _reject, info) => {
+          ptys.push({
+            cols: info.cols,
+            rows: info.rows,
+            width: info.width,
+            height: info.height,
+            term: info.term,
+          });
+          accept?.();
+        });
+        session.on('window-change', (accept, _reject, info) => {
+          ptys.push({
+            cols: info.cols,
+            rows: info.rows,
+            width: info.width,
+            height: info.height,
+            term: ptys[0]?.term ?? '',
+          });
+          accept?.();
+        });
         session.on('shell', (acceptShell) => {
-          const stream = acceptShell();
-          stream.write('welcome to the test shell\r\n$ ');
-          // Echo, so the test can prove input reaches the remote end.
-          stream.on('data', (chunk: Buffer) => stream.write(`echo:${chunk.toString('utf8')}`));
+          const open = () => {
+            const stream = acceptShell();
+            shellStream = stream;
+            stream.write('welcome to the test shell\r\n$ ');
+            // Echo, so the test can prove input reaches the remote end.
+            stream.on('data', (chunk: Buffer) => stream.write(`echo:${chunk.toString('utf8')}`));
+          };
+          if (options.shellDelayMs) setTimeout(open, options.shellDelayMs);
+          else open();
         });
       });
     });
@@ -100,6 +142,8 @@ const startServer = async (options: { authDelayMs?: number } = {}): Promise<Test
     get live() {
       return live;
     },
+    ptys,
+    writeRaw: (chunk: Buffer) => shellStream?.write(chunk),
   };
 };
 
@@ -341,5 +385,168 @@ describe('SshSessionManager', () => {
     manager.disposeForSender(SENDER);
     expect(manager.size).toBe(0);
     await waitFor(() => server.live === 0);
+  });
+});
+
+/**
+ * The terminal pipeline, as opposed to the connection.
+ *
+ * These are the parts that behave differently against a remote host than against a local one:
+ * a remote channel splits its output on arbitrary byte boundaries, and a remote handshake takes
+ * long enough for the terminal to be laid out — and resized — before the shell exists.
+ */
+describe('the remote terminal pipeline', () => {
+  it('opens an interactive pty with a full terminal type and the requested geometry', async () => {
+    const recorder = createRecorder();
+    const manager = managerWith(recorder);
+
+    await manager.connect(
+      SENDER,
+      { sessionId: 's1', profile: profileFor(), size: SIZE },
+      async () => true,
+    );
+    await waitFor(() => server.ptys.length > 0);
+
+    expect(server.ptys[0]).toEqual({
+      cols: SIZE.cols,
+      rows: SIZE.rows,
+      width: SIZE.width,
+      height: SIZE.height,
+      term: 'xterm-256color',
+    });
+
+    await manager.disconnect(SENDER, 's1');
+  });
+
+  it('opens the shell at the size the terminal reported during the handshake', async () => {
+    // A slow server stands in for a cloud instance: the terminal lays out and reports its size
+    // well before there is a channel to resize, which is exactly when the size used to be lost.
+    const slow = await startServer({ authDelayMs: 300 });
+    const recorder = createRecorder();
+    const manager = managerWith(recorder);
+
+    try {
+      const connecting = manager.connect(
+        SENDER,
+        { sessionId: 's1', profile: { ...profileFor(), port: slow.port }, size: SIZE },
+        async () => true,
+      );
+      // The renderer's first fit, while the handshake is still running.
+      await new Promise((resolve) => setTimeout(resolve, 60));
+      manager.resize(SENDER, 's1', { cols: 212, rows: 58, width: 1700, height: 900 });
+      await connecting;
+      await waitFor(() => slow.ptys.length > 0);
+
+      expect(slow.ptys[0]).toMatchObject({ cols: 212, rows: 58, width: 1700, height: 900 });
+      await manager.disconnect(SENDER, 's1');
+    } finally {
+      await slow.close();
+    }
+  });
+
+  it('propagates a later resize to the remote pty, and does not repeat an unchanged one', async () => {
+    const recorder = createRecorder();
+    const manager = managerWith(recorder);
+
+    await manager.connect(
+      SENDER,
+      { sessionId: 's1', profile: profileFor(), size: SIZE },
+      async () => true,
+    );
+    await waitFor(() => server.ptys.length === 1);
+
+    manager.resize(SENDER, 's1', { cols: 132, rows: 43, width: 1100, height: 700 });
+    await waitFor(() => server.ptys.length === 2);
+    expect(server.ptys[1]).toMatchObject({ cols: 132, rows: 43, width: 1100, height: 700 });
+
+    // A ResizeObserver fires repeatedly while a window is dragged; identical sizes are dropped
+    // rather than making the remote shell redraw over and over.
+    manager.resize(SENDER, 's1', { cols: 132, rows: 43, width: 1100, height: 700 });
+    manager.resize(SENDER, 's1', { cols: 132, rows: 43, width: 1100, height: 700 });
+    await new Promise((resolve) => setTimeout(resolve, 120));
+    expect(server.ptys).toHaveLength(2);
+
+    await manager.disconnect(SENDER, 's1');
+  });
+
+  it('decodes output split across chunks instead of emitting replacement characters', async () => {
+    const recorder = createRecorder();
+    const manager = managerWith(recorder);
+
+    await manager.connect(
+      SENDER,
+      { sessionId: 's1', profile: profileFor(), size: SIZE },
+      async () => true,
+    );
+    await waitFor(() => recorder.output().includes('$ '));
+
+    // Box drawing and an accented character: what htop, vim and a login banner actually send.
+    const text = '┌──┤ café ├──┐ ✓';
+    const bytes = Buffer.from(text, 'utf8');
+    // Split at a byte boundary inside a multi-byte character, as a network read does.
+    for (let at = 0; at < bytes.length; at += 3) {
+      server.writeRaw(bytes.subarray(at, Math.min(at + 3, bytes.length)));
+      await new Promise((resolve) => setTimeout(resolve, 10));
+    }
+
+    await waitFor(() => recorder.output().includes('✓'));
+    expect(recorder.output()).toContain(text);
+    expect(recorder.output()).not.toContain('\uFFFD');
+
+    await manager.disconnect(SENDER, 's1');
+  });
+
+  it('reassembles a large streamed output byte for byte', async () => {
+    const recorder = createRecorder();
+    const manager = managerWith(recorder);
+
+    await manager.connect(
+      SENDER,
+      { sessionId: 's1', profile: profileFor(), size: SIZE },
+      async () => true,
+    );
+    await waitFor(() => recorder.output().includes('$ '));
+    const prefix = recorder.output();
+
+    // A coloured, box-drawn screenful repeated: what htop or a long build log actually streams.
+    const line = '\u001b[32m\u2502\u001b[0m \u00e9\u00e8\u00ea build \u2705 \u2502\r\n';
+    const payload = line.repeat(400);
+    const bytes = Buffer.from(payload, 'utf8');
+    // Chunk sizes that are coprime with the character widths, so splits land mid-character.
+    for (let at = 0; at < bytes.length; at += 7) {
+      server.writeRaw(bytes.subarray(at, Math.min(at + 7, bytes.length)));
+    }
+
+    await waitFor(() => recorder.output().length >= prefix.length + payload.length, 8000);
+    expect(recorder.output().slice(prefix.length)).toBe(payload);
+
+    await manager.disconnect(SENDER, 's1');
+  });
+
+  it('forgets a closed session’s size, so the next one starts from its own', async () => {
+    const recorder = createRecorder();
+    const manager = managerWith(recorder);
+
+    await manager.connect(
+      SENDER,
+      { sessionId: 's1', profile: profileFor(), size: SIZE },
+      async () => true,
+    );
+    await waitFor(() => server.ptys.length === 1);
+    manager.resize(SENDER, 's1', { cols: 200, rows: 60, width: 1600, height: 960 });
+    // The window change has to have reached the server before the count is a stable baseline.
+    await waitFor(() => server.ptys.length === 2);
+    await manager.disconnect(SENDER, 's1');
+
+    const before = server.ptys.length;
+    await manager.connect(
+      SENDER,
+      { sessionId: 's1', profile: profileFor(), size: SIZE },
+      async () => true,
+    );
+    await waitFor(() => server.ptys.length > before);
+    expect(server.ptys[before]).toMatchObject({ cols: SIZE.cols, rows: SIZE.rows });
+
+    await manager.disconnect(SENDER, 's1');
   });
 });
