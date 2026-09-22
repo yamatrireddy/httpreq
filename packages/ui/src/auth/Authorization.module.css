@@ -2,6 +2,10 @@
   max-width: 760px;
 }
 
+.description {
+  min-height: calc(var(--mantine-font-size-xs) * var(--mantine-line-height));
+}
+
 .empty {
   display: flex;
   flex-direction: column;

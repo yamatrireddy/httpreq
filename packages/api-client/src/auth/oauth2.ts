@@ -9,7 +9,7 @@ import {
 } from '@httpreq/shared';
 import { base64Url, randomBytes, sha256, utf8 } from '../crypto';
 import { encodeBasicCredentials } from './basic';
-import { defineProvider } from './define';
+import { defineProvider, maskedCredential, withPrefix } from './define';
 import type { AuthIssue } from './types';
 
 export const OAUTH2_GRANT_LABELS: Record<OAuth2GrantType, string> = {
@@ -72,6 +72,11 @@ export const oauth2AuthProvider = defineProvider<OAuth2Auth>({
     return issues;
   },
   appliedHeaders: () => ['Authorization'],
+  // Without a token nothing is sent, so nothing is previewed.
+  previewHeaders: (config): Record<string, string> =>
+    config.accessToken
+      ? { Authorization: withPrefix(config.headerPrefix, maskedCredential(config.accessToken)) }
+      : {},
   applyToRequest(config, request) {
     if (!config.accessToken) return;
     const prefix = config.headerPrefix.trim();

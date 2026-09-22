@@ -1,5 +1,5 @@
 .bar {
-  --tab-height: 34px;
+  --tab-height: var(--hr-strip-height);
   display: flex;
   align-items: stretch;
   flex: 0 0 var(--tab-height);

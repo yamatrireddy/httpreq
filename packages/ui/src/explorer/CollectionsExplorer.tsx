@@ -18,6 +18,8 @@ import {
   IconSettings,
   IconTrash,
 } from '@tabler/icons-react';
+import { flushSync } from 'react-dom';
+import { useShallow } from 'zustand/react/shallow';
 import {
   memo,
   useEffect,
@@ -34,6 +36,7 @@ import { downloadJson, exportCollection, fileNameFor, importFile } from '../exch
 import { isLeafRow, methodColor } from '../methods';
 import { useWorkbenchStore } from '../store';
 import { buildRows, type TreeRow } from './rows';
+import { PanelHeader } from './PanelHeader';
 import classes from './Sidebar.module.css';
 
 const DRAG_TYPE = 'application/x-httpreq-node';
@@ -47,9 +50,56 @@ interface Props {
 
 const treeItemId = (id: string) => `explorer-${id}`;
 
+/** Rows are a fixed height (see `.row` in Sidebar.module.css), which is what makes windowing cheap. */
+const ROW_HEIGHT = 26;
+/** Trees up to this size render every row; larger ones render only what is on screen. */
+const VIRTUALIZE_AFTER = 150;
+const OVERSCAN = 12;
+
+/**
+ * Everything a row can ask the explorer to do, as one object whose identity never changes. Rows
+ * are memoized, and passing fresh closures to every row (as this used to) re-rendered every row,
+ * each with its own menu and tooltip, on every keystroke anywhere in the app.
+ */
+interface RowHandlers {
+  open: (row: TreeRow) => void;
+  focus: (id: string) => void;
+  menuChange: (id: string, opened: boolean) => void;
+  rename: (id: string, name: string) => void;
+  cancelRename: () => void;
+  startRename: (id: string) => void;
+  newRequest: (id: string) => void;
+  newWebSocket: (id: string) => void;
+  newFolder: (id: string) => void;
+  duplicate: (id: string) => void;
+  remove: (id: string) => void;
+  settings: (id: string) => void;
+  exportNode: (id: string) => void;
+  dragStart: (row: TreeRow, event: DragEvent) => void;
+  dragEnd: () => void;
+  dragOver: (target: TreeRow | 'drafts', key: string, event: DragEvent) => void;
+  dragLeave: (key: string, event: DragEvent) => void;
+  drop: (target: TreeRow | 'drafts', event: DragEvent) => void;
+}
+
+const ROW_FIELDS: readonly (keyof TreeRow)[] = [
+  'id',
+  'kind',
+  'name',
+  'depth',
+  'parentId',
+  'method',
+  'url',
+  'hasChildren',
+  'expanded',
+];
+const sameRow = (a: TreeRow, b: TreeRow) => ROW_FIELDS.every((field) => a[field] === b[field]);
+
 export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   const workspace = useWorkbenchStore((state) => state.workspace);
-  const drafts = useWorkbenchStore((state) => state.drafts);
+  // Only which requests have drafts matters here, not what is in them: typing must not re-render
+  // the tree.
+  const unsavedIds = useWorkbenchStore(useShallow((state) => Object.keys(state.drafts)));
   const expandedIds = useWorkbenchStore((state) => state.expandedIds);
   const selectedId = useWorkbenchStore((state) => state.selectedNodeId);
   const activeId = useWorkbenchStore((state) => state.activeRequestId);
@@ -62,11 +112,28 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   const [drop, setDrop] = useState<string | null>(null);
   const [menuFor, setMenuFor] = useState<string | null>(null);
   const dragged = useRef<string | null>(null);
+  const treeRef = useRef<HTMLDivElement>(null);
+  const [viewport, setViewport] = useState({ top: 0, height: 800 });
 
-  const { collections, drafts: draftRows } = useMemo(
-    () => buildRows(workspace, expandedIds, filter),
-    [workspace, expandedIds, filter],
-  );
+  const unsaved = useMemo(() => new Set(unsavedIds), [unsavedIds]);
+
+  // Rows that did not change keep their identity, so a rename or a move re-renders one row, not
+  // the whole tree.
+  const rowCache = useRef(new Map<string, TreeRow>());
+  const { collections, drafts: draftRows } = useMemo(() => {
+    const built = buildRows(workspace, expandedIds, filter);
+    const previous = rowCache.current;
+    const next = new Map<string, TreeRow>();
+    const keep = (row: TreeRow) => {
+      const old = previous.get(row.id);
+      const kept = old && sameRow(old, row) ? old : row;
+      next.set(row.id, kept);
+      return kept;
+    };
+    const result = { collections: built.collections.map(keep), drafts: built.drafts.map(keep) };
+    rowCache.current = next;
+    return result;
+  }, [workspace, expandedIds, filter]);
   const rows = useMemo(() => [...collections, ...draftRows], [collections, draftRows]);
   const rovingId = rows.some((row) => row.id === focusedId)
     ? focusedId
@@ -74,15 +141,65 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       ? selectedId
       : (rows[0]?.id ?? null);
 
+  /* ---------- Windowing ---------- */
+
+  const virtual = collections.length > VIRTUALIZE_AFTER;
+  useEffect(() => {
+    const element = treeRef.current;
+    if (!virtual || !element) return;
+    const measure = () => setViewport({ top: element.scrollTop, height: element.clientHeight });
+    measure();
+    const observer = new ResizeObserver(measure);
+    observer.observe(element);
+    return () => observer.disconnect();
+  }, [virtual]);
+  const scrollFrame = useRef(0);
+  const onScroll = () => {
+    const element = treeRef.current;
+    if (!element || scrollFrame.current) return;
+    scrollFrame.current = requestAnimationFrame(() => {
+      scrollFrame.current = 0;
+      setViewport({ top: element.scrollTop, height: element.clientHeight });
+    });
+  };
+  useEffect(() => () => cancelAnimationFrame(scrollFrame.current), []);
+  const windowStart = virtual ? Math.max(0, Math.floor(viewport.top / ROW_HEIGHT) - OVERSCAN) : 0;
+  const windowEnd = virtual
+    ? Math.min(
+        collections.length,
+        Math.ceil((viewport.top + viewport.height) / ROW_HEIGHT) + OVERSCAN,
+      )
+    : collections.length;
+
+  /** Scrolls a windowed row into the rendered range, so it is in the DOM to be focused. */
+  const bringIntoWindow = (id: string) => {
+    const element = treeRef.current;
+    const index = collections.findIndex((row) => row.id === id);
+    if (!virtual || !element || index < 0) return;
+    const top = index * ROW_HEIGHT;
+    let scrollTop = element.scrollTop;
+    if (top < scrollTop) scrollTop = top;
+    else if (top + ROW_HEIGHT > scrollTop + element.clientHeight) {
+      scrollTop = top + ROW_HEIGHT - element.clientHeight;
+    }
+    if (scrollTop === element.scrollTop && index >= windowStart && index < windowEnd) return;
+    element.scrollTop = scrollTop;
+    flushSync(() => setViewport({ top: scrollTop, height: element.clientHeight }));
+  };
+
   const focusRow = (id: string) => {
+    bringIntoWindow(id);
     setFocusedId(id);
     document.getElementById(treeItemId(id))?.focus();
   };
 
   // Breadcrumb navigation asks the explorer to reveal and focus a node.
+  const reveal = useRef(bringIntoWindow);
+  reveal.current = bringIntoWindow;
   useEffect(() => {
     if (!revealNonce || !selectedId) return;
     const frame = requestAnimationFrame(() => {
+      reveal.current(selectedId);
       const element = document.getElementById(treeItemId(selectedId));
       element?.scrollIntoView({ block: 'nearest' });
       element?.focus({ preventScroll: true });
@@ -102,20 +219,21 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   };
 
   const remove = async (id: string) => {
-    const node = findNode(workspace, id);
+    const { workspace: current, drafts } = actions();
+    const node = findNode(current, id);
     if (!node) return;
-    const subtree = collectSubtree(workspace, id);
+    const subtree = collectSubtree(current, id);
     const requests = new Set([...subtree.requests, ...subtree.websockets]);
     const count = isLeafNode(node) ? 0 : requests.size;
-    const unsaved = [...requests].filter((requestId) => drafts[requestId]).length;
+    const unsavedCount = [...requests].filter((requestId) => drafts[requestId]).length;
     const result = await confirmAction({
       title: `Delete ${node.kind === 'websocket' ? 'WebSocket request' : node.kind}`,
       message:
         `Delete “${node.node.name}”` +
         (count ? ` and the ${count} request${count === 1 ? '' : 's'} inside it` : '') +
         '? This cannot be undone.' +
-        (unsaved
-          ? ` ${unsaved} open request${unsaved === 1 ? ' has' : 's have'} unsaved changes.`
+        (unsavedCount
+          ? ` ${unsavedCount} open request${unsavedCount === 1 ? ' has' : 's have'} unsaved changes.`
           : ''),
       confirmLabel: 'Delete',
       danger: true,
@@ -124,7 +242,7 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   };
 
   const exportNode = (id: string) => {
-    const data = exportCollection(workspace, id);
+    const data = exportCollection(actions().workspace, id);
     if (data) downloadJson(fileNameFor(data.collection.name, 'collection'), data);
   };
 
@@ -202,14 +320,15 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   const canDrop = (target: TreeRow | 'drafts') => {
     const source = dragged.current;
     if (!source) return false;
-    const node = findNode(workspace, source);
+    const current = actions().workspace;
+    const node = findNode(current, source);
     if (!node) return false;
     if (target === 'drafts') return isLeafNode(node);
     if (target.id === source) return false;
     if (node.kind === 'collection') return target.kind === 'collection';
     if (node.kind === 'folder') {
       const destination = isLeafRow(target.kind) ? target.parentId : target.id;
-      return !!destination && !collectSubtree(workspace, source).containers.has(destination);
+      return !!destination && !collectSubtree(current, source).containers.has(destination);
     }
     return true;
   };
@@ -219,29 +338,59 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
     dragged.current = null;
     setDrop(null);
     if (!source || !canDrop(target)) return;
-    const node = findNode(workspace, source)!;
+    const node = findNode(actions().workspace, source)!;
     if (target === 'drafts') actions().moveNode(source, null);
     else if (node.kind === 'collection') actions().moveNode(source, null, target.id);
     else if (isLeafRow(target.kind)) actions().moveNode(source, target.parentId, target.id);
     else actions().moveNode(source, target.id);
   };
 
-  const dragProps = (target: TreeRow | 'drafts', key: string) => ({
-    onDragOver: (event: DragEvent) => {
-      if (!canDrop(target)) return;
-      event.preventDefault();
-      event.dataTransfer.dropEffect = 'move';
-      if (drop !== key) setDrop(key);
-    },
-    onDragLeave: (event: DragEvent) => {
-      if (!event.currentTarget.contains(event.relatedTarget as Node))
-        setDrop((current) => (current === key ? null : current));
-    },
-    onDrop: (event: DragEvent) => {
-      event.preventDefault();
-      onDrop(target);
-    },
-  });
+  // Created once; each handler calls through to the closures of the latest render, so the object
+  // stays stable without going stale.
+  const latest = useRef({ open, remove, exportNode, canDrop, onDrop, onOpenSettings });
+  latest.current = { open, remove, exportNode, canDrop, onDrop, onOpenSettings };
+  const handlers = useMemo<RowHandlers>(
+    () => ({
+      open: (row) => latest.current.open(row),
+      focus: setFocusedId,
+      menuChange: (id, opened) =>
+        setMenuFor((current) => (opened ? id : current === id ? null : current)),
+      rename: (id, name) => actions().renameNode(id, name),
+      cancelRename: () => actions().setRenaming(null),
+      startRename: (id) => actions().setRenaming(id),
+      newRequest: (id) => actions().createRequest(id),
+      newWebSocket: (id) => actions().createWebSocketRequest(id),
+      newFolder: (id) => actions().createFolder(id),
+      duplicate: (id) => actions().duplicateNode(id),
+      remove: (id) => void latest.current.remove(id),
+      settings: (id) => latest.current.onOpenSettings(id),
+      exportNode: (id) => latest.current.exportNode(id),
+      dragStart: (row, event) => {
+        dragged.current = row.id;
+        event.dataTransfer.effectAllowed = 'move';
+        event.dataTransfer.setData(DRAG_TYPE, row.id);
+      },
+      dragEnd: () => {
+        dragged.current = null;
+        setDrop(null);
+      },
+      dragOver: (target, key, event) => {
+        if (!latest.current.canDrop(target)) return;
+        event.preventDefault();
+        event.dataTransfer.dropEffect = 'move';
+        setDrop((current) => (current === key ? current : key));
+      },
+      dragLeave: (key, event) => {
+        if (!event.currentTarget.contains(event.relatedTarget as Node))
+          setDrop((current) => (current === key ? null : current));
+      },
+      drop: (target, event) => {
+        event.preventDefault();
+        latest.current.onDrop(target);
+      },
+    }),
+    [actions],
+  );
 
   const renderRow = (row: TreeRow) => (
     <ExplorerRow
@@ -250,45 +399,23 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       selected={row.id === selectedId}
       active={row.id === activeId}
       tabbable={row.id === rovingId}
-      unsaved={!!drafts[row.id]}
+      unsaved={unsaved.has(row.id)}
       renaming={row.id === renamingId}
       dropTarget={drop === row.id}
       menuOpen={menuFor === row.id}
-      onMenuChange={(opened) => setMenuFor(opened ? row.id : null)}
-      onFocusRow={setFocusedId}
-      onOpen={open}
-      onRename={(name) => actions().renameNode(row.id, name)}
-      onCancelRename={() => actions().setRenaming(null)}
-      onStartRename={() => actions().setRenaming(row.id)}
-      onNewRequest={() => actions().createRequest(row.id)}
-      onNewWebSocket={() => actions().createWebSocketRequest(row.id)}
-      onNewFolder={() => actions().createFolder(row.id)}
-      onDuplicate={() => actions().duplicateNode(row.id)}
-      onDelete={() => void remove(row.id)}
-      onSettings={() => onOpenSettings(row.id)}
-      onExport={() => exportNode(row.id)}
-      dragProps={{
-        draggable: renamingId !== row.id,
-        onDragStart: (event: DragEvent) => {
-          dragged.current = row.id;
-          event.dataTransfer.effectAllowed = 'move';
-          event.dataTransfer.setData(DRAG_TYPE, row.id);
-        },
-        onDragEnd: () => {
-          dragged.current = null;
-          setDrop(null);
-        },
-        ...dragProps(row, row.id),
-      }}
+      handlers={handlers}
     />
   );
 
+  // When the row holding the tab stop is scrolled out of the window, the tree itself takes the
+  // tab stop and passes focus on to that row, so keyboard users can always get back in.
+  const rovingIndex = collections.findIndex((row) => row.id === rovingId);
+  const rovingOutside =
+    virtual && rovingIndex >= 0 && (rovingIndex < windowStart || rovingIndex >= windowEnd);
+
   return (
     <div className={classes.explorer}>
-      <div className={classes.panelHeader}>
-        <Text component="h2" className={classes.panelTitle}>
-          Collections
-        </Text>
+      <PanelHeader title="Collections">
         <Tooltip label="New collection">
           <ActionIcon
             variant="subtle"
@@ -341,12 +468,12 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
             </Menu.Item>
           </Menu.Dropdown>
         </Menu>
-      </div>
+      </PanelHeader>
 
       <TextInput
         size="xs"
         mx={8}
-        mb={6}
+        my={6}
         aria-label="Filter collections"
         placeholder="Search requests…"
         leftSection={<IconSearch size={14} />}
@@ -366,8 +493,23 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
         }
       />
 
-      <div role="tree" aria-label="Collections" className={classes.tree} onKeyDown={onKeyDown}>
-        {collections.map(renderRow)}
+      <div
+        ref={treeRef}
+        role="tree"
+        aria-label="Collections"
+        className={classes.tree}
+        onKeyDown={onKeyDown}
+        onScroll={virtual ? onScroll : undefined}
+        tabIndex={rovingOutside ? 0 : undefined}
+        onFocus={(event) => {
+          if (rovingOutside && rovingId && event.target === event.currentTarget) focusRow(rovingId);
+        }}
+      >
+        {windowStart > 0 && <div style={{ height: windowStart * ROW_HEIGHT }} aria-hidden />}
+        {collections.slice(windowStart, windowEnd).map(renderRow)}
+        {windowEnd < collections.length && (
+          <div style={{ height: (collections.length - windowEnd) * ROW_HEIGHT }} aria-hidden />
+        )}
         {workspace.collections.length === 0 && !filter && (
           <div className={classes.emptyTree}>
             <Text size="xs" c="dimmed">
@@ -390,7 +532,9 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
         <div
           className={classes.sectionHeading}
           data-drop={drop === 'drafts' || undefined}
-          {...dragProps('drafts', 'drafts')}
+          onDragOver={(event) => handlers.dragOver('drafts', 'drafts', event)}
+          onDragLeave={(event) => handlers.dragLeave('drafts', event)}
+          onDrop={(event) => handlers.drop('drafts', event)}
           role="presentation"
         >
           Drafts
@@ -420,20 +564,7 @@ interface RowProps {
   renaming: boolean;
   dropTarget: boolean;
   menuOpen: boolean;
-  onMenuChange: (opened: boolean) => void;
-  onFocusRow: (id: string) => void;
-  onOpen: (row: TreeRow) => void;
-  onRename: (name: string) => void;
-  onCancelRename: () => void;
-  onStartRename: () => void;
-  onNewRequest: () => void;
-  onNewWebSocket: () => void;
-  onNewFolder: () => void;
-  onDuplicate: () => void;
-  onDelete: () => void;
-  onSettings: () => void;
-  onExport: () => void;
-  dragProps: Record<string, unknown>;
+  handlers: RowHandlers;
 }
 
 const ExplorerRow = memo(function ExplorerRow({
@@ -445,20 +576,7 @@ const ExplorerRow = memo(function ExplorerRow({
   renaming,
   dropTarget,
   menuOpen,
-  onMenuChange,
-  onFocusRow,
-  onOpen,
-  onRename,
-  onCancelRename,
-  onStartRename,
-  onNewRequest,
-  onNewWebSocket,
-  onNewFolder,
-  onDuplicate,
-  onDelete,
-  onSettings,
-  onExport,
-  dragProps,
+  handlers,
 }: RowProps) {
   const container = !isLeafRow(row.kind);
   const [name, setName] = useState(row.name);
@@ -468,7 +586,7 @@ const ExplorerRow = memo(function ExplorerRow({
 
   const onContextMenu = (event: MouseEvent) => {
     event.preventDefault();
-    onMenuChange(true);
+    handlers.menuChange(row.id, true);
   };
 
   const Icon = row.kind === 'collection' ? IconBox : row.expanded ? IconFolderOpen : IconFolder;
@@ -486,17 +604,22 @@ const ExplorerRow = memo(function ExplorerRow({
       data-selected={selected || undefined}
       data-drop={dropTarget || undefined}
       style={{ paddingLeft: 6 + row.depth * INDENT }}
-      onClick={() => onOpen(row)}
-      onFocus={(event) => event.target === event.currentTarget && onFocusRow(row.id)}
+      onClick={() => handlers.open(row)}
+      onFocus={(event) => event.target === event.currentTarget && handlers.focus(row.id)}
       onContextMenu={onContextMenu}
       onDoubleClick={(event) => {
         if (isLeafRow(row.kind)) {
           event.preventDefault();
-          onStartRename();
+          handlers.startRename(row.id);
         }
       }}
       title={row.url ? `${row.kind === 'websocket' ? 'WS' : row.method} ${row.url}` : row.name}
-      {...dragProps}
+      draggable={!renaming}
+      onDragStart={(event) => handlers.dragStart(row, event)}
+      onDragEnd={handlers.dragEnd}
+      onDragOver={(event) => handlers.dragOver(row, row.id, event)}
+      onDragLeave={(event) => handlers.dragLeave(row.id, event)}
+      onDrop={(event) => handlers.drop(row, event)}
     >
       <span className={classes.chevron} data-open={row.expanded || undefined} aria-hidden>
         {container && row.hasChildren && <IconChevronRight size={13} />}
@@ -525,11 +648,11 @@ const ExplorerRow = memo(function ExplorerRow({
           onFocus={(event) => event.currentTarget.select()}
           onClick={(event) => event.stopPropagation()}
           onChange={(event) => setName(event.currentTarget.value)}
-          onBlur={() => onRename(name)}
+          onBlur={() => handlers.rename(row.id, name)}
           onKeyDown={(event) => {
             event.stopPropagation();
-            if (event.key === 'Enter') onRename(name);
-            if (event.key === 'Escape') onCancelRename();
+            if (event.key === 'Enter') handlers.rename(row.id, name);
+            if (event.key === 'Escape') handlers.cancelRename();
           }}
         />
       ) : (
@@ -550,7 +673,7 @@ const ExplorerRow = memo(function ExplorerRow({
               size="xs"
               tabIndex={-1}
               aria-label={`New request in ${row.name}`}
-              onClick={onNewRequest}
+              onClick={() => handlers.newRequest(row.id)}
             >
               <IconPlus size={13} />
             </ActionIcon>
@@ -558,7 +681,7 @@ const ExplorerRow = memo(function ExplorerRow({
         )}
         <Menu
           opened={menuOpen}
-          onChange={onMenuChange}
+          onChange={(opened) => handlers.menuChange(row.id, opened)}
           position="bottom-end"
           withinPortal
           shadow="md"
@@ -578,16 +701,28 @@ const ExplorerRow = memo(function ExplorerRow({
           <Menu.Dropdown>
             {container && (
               <>
-                <Menu.Item leftSection={<IconPlus size={14} />} onClick={onNewRequest}>
+                <Menu.Item
+                  leftSection={<IconPlus size={14} />}
+                  onClick={() => handlers.newRequest(row.id)}
+                >
                   New request
                 </Menu.Item>
-                <Menu.Item leftSection={<IconBolt size={14} />} onClick={onNewWebSocket}>
+                <Menu.Item
+                  leftSection={<IconBolt size={14} />}
+                  onClick={() => handlers.newWebSocket(row.id)}
+                >
                   New WebSocket request
                 </Menu.Item>
-                <Menu.Item leftSection={<IconFolderPlus size={14} />} onClick={onNewFolder}>
+                <Menu.Item
+                  leftSection={<IconFolderPlus size={14} />}
+                  onClick={() => handlers.newFolder(row.id)}
+                >
                   New folder
                 </Menu.Item>
-                <Menu.Item leftSection={<IconSettings size={14} />} onClick={onSettings}>
+                <Menu.Item
+                  leftSection={<IconSettings size={14} />}
+                  onClick={() => handlers.settings(row.id)}
+                >
                   Settings & authorization…
                 </Menu.Item>
                 <Menu.Divider />
@@ -600,20 +735,30 @@ const ExplorerRow = memo(function ExplorerRow({
                   F2
                 </Text>
               }
-              onClick={onStartRename}
+              onClick={() => handlers.startRename(row.id)}
             >
               Rename
             </Menu.Item>
-            <Menu.Item leftSection={<IconCopy size={14} />} onClick={onDuplicate}>
+            <Menu.Item
+              leftSection={<IconCopy size={14} />}
+              onClick={() => handlers.duplicate(row.id)}
+            >
               Duplicate
             </Menu.Item>
             {row.kind === 'collection' && (
-              <Menu.Item leftSection={<IconDownload size={14} />} onClick={onExport}>
+              <Menu.Item
+                leftSection={<IconDownload size={14} />}
+                onClick={() => handlers.exportNode(row.id)}
+              >
                 Export…
               </Menu.Item>
             )}
             <Menu.Divider />
-            <Menu.Item color="red" leftSection={<IconTrash size={14} />} onClick={onDelete}>
+            <Menu.Item
+              color="red"
+              leftSection={<IconTrash size={14} />}
+              onClick={() => handlers.remove(row.id)}
+            >
               Delete
             </Menu.Item>
           </Menu.Dropdown>

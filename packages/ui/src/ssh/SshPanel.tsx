@@ -16,6 +16,7 @@ import { tunnelsUsingSshProfile, useWorkbenchStore } from '../store';
 import { SshProfileDialog } from './SshProfileDialog';
 import { useSsh } from './useSsh';
 import classes from './Ssh.module.css';
+import { PanelHeader } from '../explorer/PanelHeader';
 
 /** The SSH sidebar view: the workspace's connection profiles and their live sessions. */
 export function SshPanel({ onOpened }: { onOpened?: () => void }) {
@@ -62,10 +63,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
 
   return (
     <div className={classes.panel}>
-      <div className={classes.panelHeader}>
-        <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-          Connections
-        </Text>
+      <PanelHeader title="Connections">
         <Tooltip label="New SSH connection">
           <ActionIcon
             variant="subtle"
@@ -77,7 +75,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
             <IconPlus size={15} />
           </ActionIcon>
         </Tooltip>
-      </div>
+      </PanelHeader>
 
       <div className={classes.list}>
         {profiles.length === 0 ? (

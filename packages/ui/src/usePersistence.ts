@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import type {
   HistoryEntry,
   HistoryRepository,
@@ -90,11 +90,21 @@ export function usePersistence(
         (preferred && list.some((item) => item.id === preferred) ? preferred : null) ??
         sortWorkspaces(list)[0]?.id ??
         null;
-      const stored = target ? await repository.getWorkspace(target).catch(() => null) : null;
+      const read = (id: string) => repository.getWorkspace(id).catch(() => null);
+      let stored = target ? await read(target) : null;
+      // An unreadable workspace must not stop the app: fall back to the next one that loads.
+      for (const meta of sortWorkspaces(list)) {
+        if (stored || cancelled) break;
+        if (meta.id !== target) stored = await read(meta.id);
+      }
       if (cancelled) return;
-      const workspace = stored ?? createDefaultWorkspace();
-      if (!stored) {
-        // A brand-new installation: write the starter workspace so it appears in the index.
+      let workspace = stored;
+      if (!workspace) {
+        // A brand-new installation gets the starter workspace. When workspaces exist but none
+        // could be read, a fresh one takes a new id: the starter's fixed id could belong to one of
+        // them, and writing it would replace that workspace's data.
+        workspace = list.length ? createWorkspace('Recovered Workspace') : createDefaultWorkspace();
+        // Written so it appears in the index.
         await repository.saveWorkspace(workspace).catch(() => undefined);
       }
       await install(workspace);
@@ -320,7 +330,10 @@ export function usePersistence(
     [install, refreshIndex, repository],
   );
 
-  const workspaceActions: WorkspaceActions = { create, duplicate, rename, remove, switchTo };
+  const workspaceActions = useMemo<WorkspaceActions>(
+    () => ({ create, duplicate, rename, remove, switchTo }),
+    [create, duplicate, rename, remove, switchTo],
+  );
 
   return { loaded, saveRequest, recordHistory, clearHistory, workspaceActions };
 }

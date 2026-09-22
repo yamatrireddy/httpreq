@@ -35,7 +35,7 @@ export interface TabItem {
   connected?: boolean;
 }
 
-interface Props {
+export interface RequestTabsProps {
   requests: TabItem[];
   activeId: string;
   unsavedIds: ReadonlySet<string>;
@@ -77,7 +77,7 @@ export const RequestTabs = memo(function RequestTabs({
   newShortcut,
   closeShortcut,
   actions,
-}: Props) {
+}: RequestTabsProps) {
   const viewportRef = useRef<HTMLDivElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
   const [edges, setEdges] = useState({ previous: false, next: false });

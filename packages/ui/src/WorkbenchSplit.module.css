@@ -13,7 +13,10 @@
   overflow: hidden;
 }
 
+/* A size container, so what the reading pane shows can follow its own width as the splitter
+   moves, not only the window's. */
 .second {
+  container: workbench-pane / inline-size;
   outline: none;
 }
 

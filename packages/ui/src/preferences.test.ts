@@ -15,6 +15,7 @@ describe('parsePreferences', () => {
       sidebarVisible: false,
       sidebarWidth: 9999,
       statusBarVisible: false,
+      generatedHeadersVisible: false,
     });
     expect(parsePreferences(stored)).toEqual({
       responsePosition: 'bottom',
@@ -22,6 +23,7 @@ describe('parsePreferences', () => {
       sidebarVisible: false,
       sidebarWidth: 560,
       statusBarVisible: false,
+      generatedHeadersVisible: false,
     });
   });
 

@@ -59,7 +59,7 @@ import { LayoutToggle } from './LayoutToggle';
 import type { MenuDefinition } from './MenuBar';
 import { REQUEST_PANEL_ID, requestTabId } from './methods';
 import { usePreferences } from './preferences';
-import { RequestTabs, type TabItem } from './RequestTabs';
+import type { TabItem } from './RequestTabs';
 import { ResponsePanel } from './ResponsePanel';
 import { formatChord } from './shortcuts';
 import { StatusBar } from './StatusBar';
@@ -71,6 +71,7 @@ import { TunnelContext, useTunnelManager } from './tunnels/useTunnels';
 import { WebSocketContext, useWebSocketManager } from './websocket/useWebSockets';
 import { WebSocketEditor } from './websocket/WebSocketEditor';
 import { WorkbenchSplit } from './WorkbenchSplit';
+import { WorkbenchTabs } from './WorkbenchTabs';
 import { WorkspaceSwitcher } from './WorkspaceSwitcher';
 import { Z_LAYERS } from './zLayers';
 import { TitleBar } from './TitleBar';
@@ -186,6 +187,12 @@ const pipelineContext = (): PipelineContext => {
   return { workspace, environment: activeEnvironment(workspace), readFile: readAttachment };
 };
 
+/** The active request's response, read here so a new response re-renders only this pane. */
+function ActiveResponse({ requestId, loading }: { requestId: string; loading: boolean }) {
+  const response = useWorkbenchStore((state) => state.responses[requestId]);
+  return <ResponsePanel response={response} loading={loading} />;
+}
+
 export function HttpReqApp({ runtime, repository, history, desktop, bridge, version }: Props) {
   const [opened, { toggle, close: closeNav }] = useDisclosure();
   const [dialog, setDialog] = useState<Dialog | null>(null);
@@ -211,12 +218,9 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   const openSshIds = useWorkbenchStore((state) => state.openSshSessionIds);
   const activeSshId = useWorkbenchStore((state) => state.activeSshSessionId);
   const sshSessions = useConnectionsStore((state) => state.sessions);
-  const socketStates = useConnectionsStore((state) => state.sockets);
   const environments = useWorkbenchStore((state) => state.workspace.environments);
   const activeEnvironmentId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
-  const drafts = useWorkbenchStore((state) => state.drafts);
   const activeId = useWorkbenchStore((state) => state.activeRequestId);
-  const responses = useWorkbenchStore((state) => state.responses);
   const setActiveRequest = useWorkbenchStore((state) => state.setActiveRequest);
   const cycleRequest = useWorkbenchStore((state) => state.cycleRequest);
   const moveTab = useWorkbenchStore((state) => state.moveTab);
@@ -257,6 +261,9 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   /*
    * The tab strip holds three kinds of tab. Request tabs (HTTP and WebSocket) are ordered by the
    * workspace's `openRequestIds` and persist; SSH terminals are ephemeral and follow them.
+   *
+   * Only saved, structural data is read here. Unsaved edits and live socket state are applied by
+   * `WorkbenchTabs` itself: the shell must not re-render on every keystroke or socket message.
    */
   const requestTabs = useMemo<TabItem[]>(() => {
     const http = new Map(requests.map((request) => [request.id, request]));
@@ -264,31 +271,12 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
     return openIds.flatMap((id): TabItem[] => {
       const saved = http.get(id);
       if (saved) {
-        const draft = drafts[id];
-        return [
-          {
-            id,
-            kind: 'request',
-            name: saved.name,
-            method: draft?.method ?? saved.method,
-            url: draft?.url ?? saved.url,
-          },
-        ];
+        return [{ id, kind: 'request', name: saved.name, method: saved.method, url: saved.url }];
       }
       const socket = sockets.get(id);
-      if (!socket) return [];
-      const status = socketStates[id]?.status;
-      return [
-        {
-          id,
-          kind: 'websocket',
-          name: socket.name,
-          url: socket.url,
-          connected: status === 'connected',
-        },
-      ];
+      return socket ? [{ id, kind: 'websocket', name: socket.name, url: socket.url }] : [];
     });
-  }, [requests, socketRequests, openIds, drafts, socketStates]);
+  }, [requests, socketRequests, openIds]);
 
   const sshTabs = useMemo<TabItem[]>(
     () =>
@@ -309,7 +297,6 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   );
 
   const tabs = useMemo(() => [...requestTabs, ...sshTabs], [requestTabs, sshTabs]);
-  const unsavedIds = useMemo(() => new Set(Object.keys(drafts)), [drafts]);
   const activeTabId = activeSshId ?? activeId ?? '';
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeName = activeTab?.name;
@@ -475,6 +462,17 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   );
 
   const closeTab = useCallback((id: string) => closeTabs([id]), [closeTabs]);
+  const onCloseTab = useCallback((id: string) => void closeTab(id), [closeTab]);
+  const onCloseTabs = useCallback((ids: string[]) => void closeTabs(ids), [closeTabs]);
+  const tabActions = useMemo(
+    () => (
+      <>
+        <EnvironmentSelect />
+        <LayoutToggle />
+      </>
+    ),
+    [],
+  );
 
   /** Releases every live resource this workspace owns, before it is replaced or the app exits. */
   const releaseConnections = useCallback(async () => {
@@ -801,23 +799,17 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                   </AppShell.Navbar>
 
                   <AppShell.Main className={classes.main}>
-                    <RequestTabs
-                      requests={tabs}
+                    <WorkbenchTabs
+                      tabs={tabs}
                       activeId={activeTabId}
-                      unsavedIds={unsavedIds}
                       onActivate={activateTab}
-                      onClose={(id) => void closeTab(id)}
-                      onCloseMany={(ids) => void closeTabs(ids)}
+                      onClose={onCloseTab}
+                      onCloseMany={onCloseTabs}
                       onNew={newRequest}
                       onMove={moveTabAnyKind}
                       newShortcut={shortcutLabel('request.new')}
                       closeShortcut={shortcutLabel('request.close')}
-                      actions={
-                        <>
-                          <EnvironmentSelect />
-                          <LayoutToggle />
-                        </>
-                      }
+                      actions={tabActions}
                     />
 
                     {/*
@@ -885,9 +877,7 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                               }}
                             />
                           }
-                          response={
-                            <ResponsePanel response={responses[activeId]} loading={sending} />
-                          }
+                          response={<ActiveResponse requestId={activeId} loading={sending} />}
                         />
                       </div>
                     ) : (

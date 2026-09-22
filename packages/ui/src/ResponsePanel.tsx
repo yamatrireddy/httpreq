@@ -2,7 +2,6 @@ import {
   Badge,
   Box,
   Center,
-  Group,
   Loader,
   SegmentedControl,
   Stack,
@@ -13,15 +12,76 @@ import {
 } from '@mantine/core';
 import { useComputedColorScheme } from '@mantine/core';
 import { IconBraces, IconClock, IconDatabase } from '@tabler/icons-react';
-import { lazy, Suspense, useMemo, useState } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type { HttpResponse } from '@httpreq/shared';
+import { prettyJson, WORKER_FORMAT_THRESHOLD } from './prettyJson';
+import { prettyJsonText } from './prettyJsonText';
+import { ScrollableTabsList } from './ScrollableTabsList';
 import { MONO_FONT_FAMILY } from './theme';
 import classes from './ResponsePanel.module.css';
 
 const Editor = lazy(() => import('./LocalEditor'));
 
+/**
+ * From this size the viewer drops line wrapping and folding. Wrapping makes the editor compute
+ * the break points of every line up front, and a minified multi-megabyte body is one enormous
+ * line; both features are what made large responses freeze the window.
+ */
+export const LARGE_BODY_CHARS = 2 * 1024 * 1024;
+/** From this size the body is shown as plain text, without JSON highlighting and validation. */
+export const PLAIN_TEXT_CHARS = 16 * 1024 * 1024;
+
 const formatBytes = (bytes: number) =>
-  bytes < 1024 ? `${bytes} B` : `${(bytes / 1024).toFixed(1)} KB`;
+  bytes < 1024
+    ? `${bytes} B`
+    : bytes < 1024 * 1024
+      ? `${(bytes / 1024).toFixed(1)} KB`
+      : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
+
+/** Formatted bodies, per response, so switching tabs or views never formats one twice. */
+const formatted = new WeakMap<HttpResponse, string>();
+
+type BodyView = 'pretty' | 'raw';
+type ResponseTab = 'body' | 'headers';
+
+/**
+ * The text the body viewer shows: raw, or indented JSON. Large bodies are indented in a worker;
+ * `null` means that is still in progress.
+ */
+function useDisplayedBody(response: HttpResponse | undefined, view: BodyView): string | null {
+  const json = !!response?.contentType.includes('json');
+  const wantsPretty = !!response && json && view === 'pretty';
+  const small = !!response && response.body.length < WORKER_FORMAT_THRESHOLD;
+  const [done, setDone] = useState<{ response: HttpResponse; text: string } | null>(null);
+
+  // Small bodies are formatted during render: faster than a round trip, and no flash of a loader.
+  const inline = useMemo(
+    () => (wantsPretty && small ? prettyJsonText(response.body) : null),
+    [response, wantsPretty, small],
+  );
+
+  useEffect(() => {
+    if (!response || !wantsPretty || small) return;
+    const cached = formatted.get(response);
+    if (cached !== undefined) {
+      setDone({ response, text: cached });
+      return;
+    }
+    let live = true;
+    void prettyJson(response.body).then((text) => {
+      formatted.set(response, text);
+      if (live) setDone({ response, text });
+    });
+    return () => {
+      live = false;
+    };
+  }, [response, wantsPretty, small]);
+
+  if (!response) return '';
+  if (!wantsPretty) return response.body;
+  if (inline !== null) return inline;
+  return done?.response === response ? done.text : (formatted.get(response) ?? null);
+}
 
 export function ResponsePanel({
   response,
@@ -31,18 +91,9 @@ export function ResponsePanel({
   loading: boolean;
 }) {
   const colorScheme = useComputedColorScheme('dark');
-  const [view, setView] = useState('pretty');
-  const displayedBody = useMemo(() => {
-    if (!response || view === 'raw') return response?.body ?? '';
-    if (response.contentType.includes('json')) {
-      try {
-        return JSON.stringify(JSON.parse(response.body), null, 2);
-      } catch {
-        return response.body;
-      }
-    }
-    return response.body;
-  }, [response, view]);
+  const [view, setView] = useState<BodyView>('pretty');
+  const [tab, setTab] = useState<ResponseTab>('body');
+  const displayedBody = useDisplayedBody(response, view);
 
   if (!response) {
     return (
@@ -60,61 +111,105 @@ export function ResponsePanel({
     );
   }
 
+  const json = response.contentType.includes('json');
+  const size = displayedBody?.length ?? response.body.length;
+  const large = size >= LARGE_BODY_CHARS;
+  const headerCount = Object.keys(response.headers).length;
+
   return (
-    <Tabs defaultValue="body" className={`response-tabs ${classes.root}`}>
-      <Group justify="space-between" px="sm" gap="xs" wrap="nowrap" className="response-heading">
-        <Tabs.List>
+    <Tabs
+      value={tab}
+      onChange={(value) => value && setTab(value as ResponseTab)}
+      keepMounted={false}
+      className={classes.root}
+    >
+      {/*
+       * One strip holds the tabs, the body view switch and the summary, so the content starts
+       * right under it. The view switch keeps its slot on the Headers tab too (hidden), so
+       * switching tabs never moves anything.
+       */}
+      <div className={classes.heading}>
+        <ScrollableTabsList active={tab} frameClassName={classes.tabFrame} aria-label="Response">
           <Tabs.Tab value="body">Body</Tabs.Tab>
-          <Tabs.Tab value="headers">Headers ({Object.keys(response.headers).length})</Tabs.Tab>
-        </Tabs.List>
-        <Group gap={6} wrap="nowrap" className={classes.meta} aria-label="Response summary">
-          <Badge color={response.status < 400 ? 'teal' : 'red'} variant="light" radius="xs">
-            {response.status} {response.statusText}
-          </Badge>
-          <Badge color="gray" variant="light" radius="xs" leftSection={<IconClock size={12} />}>
-            {response.durationMs} ms
-          </Badge>
-          <Badge color="gray" variant="light" radius="xs" leftSection={<IconDatabase size={12} />}>
-            {formatBytes(response.sizeBytes)}
-          </Badge>
-        </Group>
-      </Group>
-      <Tabs.Panel value="body" className={classes.bodyPanel}>
-        <Group justify="flex-end" px="sm" py={6}>
-          <SegmentedControl
-            size="xs"
-            value={view}
-            onChange={setView}
-            data={['pretty', 'raw']}
-            aria-label="Body view"
-          />
-        </Group>
-        <Box className={`editor-frame ${classes.editor}`}>
-          <Suspense
-            fallback={
-              <Center h="100%">
-                <Loader size="sm" />
-              </Center>
-            }
-          >
-            <Editor
-              language={response.contentType.includes('json') ? 'json' : 'text'}
-              theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
-              value={displayedBody}
-              options={{
-                readOnly: true,
-                minimap: { enabled: false },
-                fontSize: 13,
-                fontFamily: MONO_FONT_FAMILY,
-                scrollBeyondLastLine: false,
-                wordWrap: 'on',
-                automaticLayout: true,
-              }}
+          <Tabs.Tab value="headers">
+            Headers <span className={classes.count}>{headerCount}</span>
+          </Tabs.Tab>
+        </ScrollableTabsList>
+        <div className={classes.tools}>
+          {json && (
+            <SegmentedControl
+              size="xs"
+              value={view}
+              onChange={(value) => setView(value as BodyView)}
+              data={[
+                { value: 'pretty', label: 'Pretty' },
+                { value: 'raw', label: 'Raw' },
+              ]}
+              aria-label="Body view"
+              className={classes.viewSwitch}
+              data-hidden={tab !== 'body' || undefined}
             />
-          </Suspense>
+          )}
+          <div className={classes.meta} aria-label="Response summary">
+            <Badge color={response.status < 400 ? 'teal' : 'red'} variant="light" radius="xs">
+              {response.status} {response.statusText}
+            </Badge>
+            <Badge color="gray" variant="light" radius="xs" leftSection={<IconClock size={12} />}>
+              {response.durationMs} ms
+            </Badge>
+            <Badge
+              color="gray"
+              variant="light"
+              radius="xs"
+              leftSection={<IconDatabase size={12} />}
+            >
+              {formatBytes(response.sizeBytes)}
+            </Badge>
+          </div>
+        </div>
+      </div>
+
+      <Tabs.Panel value="body" className={classes.bodyPanel}>
+        {large && (
+          <Text size="xs" c="dimmed" className={classes.notice}>
+            Large response ({formatBytes(response.sizeBytes)}): line wrapping and folding are off
+            {size >= PLAIN_TEXT_CHARS ? ', and so is highlighting' : ''}, to keep scrolling smooth.
+          </Text>
+        )}
+        <Box className={`editor-frame ${classes.editor}`}>
+          {displayedBody === null ? (
+            <Center h="100%">
+              <Loader size="sm" aria-label="Formatting the response" />
+            </Center>
+          ) : (
+            <Suspense
+              fallback={
+                <Center h="100%">
+                  <Loader size="sm" />
+                </Center>
+              }
+            >
+              <Editor
+                language={json && size < PLAIN_TEXT_CHARS ? 'json' : 'text'}
+                theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
+                value={displayedBody}
+                options={{
+                  readOnly: true,
+                  domReadOnly: true,
+                  minimap: { enabled: false },
+                  fontSize: 13,
+                  fontFamily: MONO_FONT_FAMILY,
+                  scrollBeyondLastLine: false,
+                  wordWrap: large ? 'off' : 'on',
+                  folding: !large,
+                  automaticLayout: true,
+                }}
+              />
+            </Suspense>
+          )}
         </Box>
       </Tabs.Panel>
-      <Tabs.Panel value="headers" p="sm" className={classes.headersPanel}>
+      <Tabs.Panel value="headers" className={classes.headersPanel}>
         <Table striped highlightOnHover withTableBorder className="hr-mono">
           <Table.Tbody>
             {Object.entries(response.headers).map(([key, value]) => (

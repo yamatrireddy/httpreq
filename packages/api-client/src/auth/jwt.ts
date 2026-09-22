@@ -1,6 +1,6 @@
 import { AppError, JWT_ALGORITHMS, type JwtAlgorithm, type JwtAuth } from '@httpreq/shared';
 import { base64ToBytes, base64Url, utf8 } from '../crypto';
-import { defineProvider } from './define';
+import { defineProvider, withPrefix } from './define';
 import type { AuthIssue } from './types';
 
 type Hash = 'SHA-256' | 'SHA-384' | 'SHA-512';
@@ -163,6 +163,10 @@ export const jwtAuthProvider = defineProvider<JwtAuth>({
     ...validJson(config.header, 'header', 'header'),
   ],
   appliedHeaders: (config) => (config.addTo === 'header' ? ['Authorization'] : []),
+  previewHeaders: (config): Record<string, string> =>
+    config.addTo === 'header'
+      ? { Authorization: withPrefix(config.headerPrefix, '<JWT signed when the request is sent>') }
+      : {},
   async applyToRequest(config, request, context) {
     const token = await signJwt(config, context.now());
     if (config.addTo === 'query') {

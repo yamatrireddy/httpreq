@@ -9,6 +9,7 @@ export * from './auth/oauth2';
 export * from './auth/registry';
 export * from './auth/types';
 export * from './curl';
+export * from './generatedHeaders';
 export * from './pipeline';
 export * from './transport';
 export * from './variables';

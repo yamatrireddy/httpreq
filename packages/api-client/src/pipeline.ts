@@ -12,6 +12,7 @@ import {
 } from '@httpreq/shared';
 import { getAuthProvider, resolveEffectiveAuth, type EffectiveAuth } from './auth/registry';
 import { HeaderMap, type AuthContext, type RequestDraft } from './auth/types';
+import { defaultBodyContentType } from './generatedHeaders';
 import { createVariableResolver, type ResolverOptions, type VariableResolver } from './variables';
 
 /**
@@ -90,8 +91,10 @@ const buildBody = async (
     warnings.push(`The body is not sent with ${request.method} requests.`);
     return undefined;
   }
-  const defaultType = (type: string) => {
-    if (!headers.has('Content-Type')) headers.set('Content-Type', type);
+  // The same mapping the editor previews, so what it shows is what is sent.
+  const defaultType = () => {
+    const type = defaultBodyContentType(body);
+    if (type && !headers.has('Content-Type')) headers.set('Content-Type', type);
   };
 
   switch (body.mode) {
@@ -107,18 +110,18 @@ const buildBody = async (
           { cause },
         );
       }
-      defaultType('application/json');
+      defaultType();
       return { kind: 'text', text };
     }
     case 'text':
-      defaultType(body.textContentType);
+      defaultType();
       return { kind: 'text', text: resolver.resolve(body.text) };
     case 'form-urlencoded': {
       const form = new URLSearchParams();
       enabledRows(body.formUrlEncoded).forEach((item) =>
         form.append(resolver.resolve(item.key), resolver.resolve(item.value)),
       );
-      defaultType('application/x-www-form-urlencoded');
+      defaultType();
       return { kind: 'text', text: form.toString() };
     }
     case 'multipart': {
@@ -148,7 +151,7 @@ const buildBody = async (
     }
     case 'binary': {
       const bytes = await readFile(context, body.binary);
-      defaultType(body.binary?.type || 'application/octet-stream');
+      defaultType();
       return { kind: 'bytes', bytes };
     }
   }

@@ -21,6 +21,7 @@ import { useWorkbenchStore } from '../store';
 import { TunnelDialog } from './TunnelDialog';
 import { useTunnels } from './useTunnels';
 import classes from '../ssh/Ssh.module.css';
+import { PanelHeader } from '../explorer/PanelHeader';
 
 const STATUS_LABEL: Record<TunnelStatus, string> = {
   stopped: 'Stopped',
@@ -71,10 +72,7 @@ export function TunnelsPanel() {
 
   return (
     <div className={classes.panel}>
-      <div className={classes.panelHeader}>
-        <Text size="xs" fw={600} tt="uppercase" c="dimmed">
-          Tunnels
-        </Text>
+      <PanelHeader title="Tunnels">
         <Tooltip label="New tunnel">
           <ActionIcon
             variant="subtle"
@@ -86,7 +84,7 @@ export function TunnelsPanel() {
             <IconPlus size={15} />
           </ActionIcon>
         </Tooltip>
-      </div>
+      </PanelHeader>
 
       <div className={classes.list}>
         {profiles.length === 0 ? (

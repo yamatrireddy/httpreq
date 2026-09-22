@@ -1,3 +1,4 @@
+export * from './equality';
 export * from './capabilities';
 export * from './model';
 export * from './ssh';

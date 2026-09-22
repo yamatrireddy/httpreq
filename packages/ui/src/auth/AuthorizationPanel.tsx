@@ -61,24 +61,22 @@ export function AuthorizationPanel({
   }));
 
   return (
-    <Stack gap="md" className={classes.root}>
+    <Stack gap="md" className={`hr-form ${classes.root}`}>
       <Stack gap={4}>
         <Select
           label="Authorization type"
           value={auth.type}
           allowDeselect={false}
           data={options}
-          maw={320}
           onChange={(type) =>
             type && type !== auth.type && onChange(authProviders[type as AuthType].create())
           }
           comboboxProps={{ withinPortal: true, middlewares: { flip: true, shift: true } }}
         />
-        {auth.type !== 'none' && auth.type !== 'inherit' && (
-          <Text size="xs" c="dimmed">
-            {provider.description}
-          </Text>
-        )}
+        {/* Always one line of description, so switching schemes never moves what follows. */}
+        <Text size="xs" c="dimmed" className={classes.description}>
+          {provider.description}
+        </Text>
       </Stack>
 
       {auth.type === 'none' && (

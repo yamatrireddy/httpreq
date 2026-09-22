@@ -5,6 +5,7 @@ import {
   KeyValueWorkspaceRepository,
   MemoryStore,
 } from '@httpreq/storage';
+import { createDefaultWorkspace, createWorkspace } from '@httpreq/workspace';
 import { usePersistence } from './usePersistence';
 import { useWorkbenchStore } from './store';
 
@@ -98,5 +99,42 @@ describe('renaming a workspace', () => {
 
     // An unreadable index must not make the switcher look as though the workspace were deleted.
     expect(names()).toEqual(['Still here']);
+  });
+});
+
+describe('starting up when a workspace cannot be read', () => {
+  it('opens the next readable workspace instead of replacing anything', async () => {
+    const { repository, history } = harness();
+    const good = { ...createDefaultWorkspace(), name: 'Mine' };
+    const broken = { ...createWorkspace('Broken'), updatedAt: '2099-01-01T00:00:00.000Z' };
+    await repository.saveWorkspace(good);
+    await repository.saveWorkspace(broken);
+    await repository.setActiveWorkspaceId(broken.id);
+    const read = repository.getWorkspace.bind(repository);
+    vi.spyOn(repository, 'getWorkspace').mockImplementation((id) =>
+      id === broken.id ? Promise.reject(new Error('unreadable')) : read(id),
+    );
+
+    await loaded(repository, history);
+
+    expect(useWorkbenchStore.getState().workspace.id).toBe(good.id);
+    expect((await read(good.id))?.name).toBe('Mine');
+  });
+
+  it('never overwrites the starter workspace id when nothing can be read', async () => {
+    const { repository, history } = harness();
+    const mine = { ...createDefaultWorkspace(), name: 'Mine' };
+    await repository.saveWorkspace(mine);
+    const read = repository.getWorkspace.bind(repository);
+    vi.spyOn(repository, 'getWorkspace').mockImplementation((id) =>
+      id === mine.id ? Promise.reject(new Error('unreadable')) : read(id),
+    );
+
+    await loaded(repository, history);
+
+    // A new workspace was opened, under a new id; the unreadable one was left alone.
+    expect(useWorkbenchStore.getState().workspace.id).not.toBe(mine.id);
+    vi.mocked(repository.getWorkspace).mockRestore();
+    expect((await repository.getWorkspace(mine.id))?.name).toBe('Mine');
   });
 });

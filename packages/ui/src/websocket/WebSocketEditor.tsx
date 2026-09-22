@@ -35,6 +35,7 @@ import { emptySocket, useConnectionsStore } from '../connections';
 import { CodeEditor } from '../editor/CodeEditor';
 import { KeyValueTable } from '../editor/KeyValueTable';
 import { VariableInput } from '../editor/VariableInput';
+import { ScrollableTabsList } from '../ScrollableTabsList';
 import { WorkbenchSplit } from '../WorkbenchSplit';
 import { useWorkbenchStore } from '../store';
 import { MessageList } from './MessageList';
@@ -186,12 +187,12 @@ export function WebSocketEditor({ requestId }: Props) {
             keepMounted={false}
             style={{ minHeight: 0, flex: 1, display: 'flex', flexDirection: 'column' }}
           >
-            <Tabs.List>
+            <ScrollableTabsList active={tab} aria-label="WebSocket request">
               <Tabs.Tab value="params">Params</Tabs.Tab>
               <Tabs.Tab value="headers">Headers</Tabs.Tab>
               <Tabs.Tab value="authorization">Authorization</Tabs.Tab>
               <Tabs.Tab value="settings">Settings</Tabs.Tab>
-            </Tabs.List>
+            </ScrollableTabsList>
 
             <div className={classes.tabsBody}>
               <Tabs.Panel value="params">

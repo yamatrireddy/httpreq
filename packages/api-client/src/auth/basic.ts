@@ -1,6 +1,6 @@
 import type { ApiKeyAuth, BasicAuth, BearerAuth, InheritAuth, NoAuth } from '@httpreq/shared';
 import { bytesToBase64, utf8 } from '../crypto';
-import { defineProvider } from './define';
+import { defineProvider, maskedCredential, withPrefix } from './define';
 import type { AuthIssue } from './types';
 
 const required = (value: string, field: string, message: string): AuthIssue[] =>
@@ -37,6 +37,10 @@ export const apiKeyAuthProvider = defineProvider<ApiKeyAuth>({
   create: () => ({ type: 'api-key', key: '', value: '', location: 'header' }),
   validate: (config) => required(config.key, 'key', 'Enter the key name.'),
   appliedHeaders: (config) => (config.location === 'header' && config.key ? [config.key] : []),
+  previewHeaders: (config): Record<string, string> =>
+    config.location === 'header' && config.key
+      ? { [config.key]: maskedCredential(config.value, '<empty>') }
+      : {},
   applyToRequest(config, request) {
     if (!config.key) return;
     if (config.location === 'header') request.headers.set(config.key, config.value);
@@ -52,6 +56,9 @@ export const bearerAuthProvider = defineProvider<BearerAuth>({
   create: () => ({ type: 'bearer', token: '', prefix: 'Bearer' }),
   validate: (config) => required(config.token, 'token', 'The token is empty.'),
   appliedHeaders: () => ['Authorization'],
+  previewHeaders: (config) => ({
+    Authorization: withPrefix(config.prefix, maskedCredential(config.token)),
+  }),
   applyToRequest(config, request) {
     const prefix = config.prefix.trim();
     request.headers.set('Authorization', prefix ? `${prefix} ${config.token}` : config.token);
@@ -69,6 +76,7 @@ export const basicAuthProvider = defineProvider<BasicAuth>({
   create: () => ({ type: 'basic', username: '', password: '' }),
   validate: (config) => required(config.username, 'username', 'Enter a username.'),
   appliedHeaders: () => ['Authorization'],
+  previewHeaders: () => ({ Authorization: 'Basic <base64 of username:password>' }),
   applyToRequest(config, request) {
     request.headers.set(
       'Authorization',

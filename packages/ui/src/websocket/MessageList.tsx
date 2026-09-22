@@ -44,6 +44,36 @@ interface Props {
 }
 
 /**
+ * One logged frame. Memoized so a new message renders one row, not the whole log again: a chatty
+ * socket delivers many messages a second into a log of up to several hundred.
+ */
+const MessageRow = memo(function MessageRow({ message }: { message: WebSocketMessage }) {
+  return (
+    <div
+      className={classes.message}
+      data-direction={message.direction}
+      data-error={message.error ? 'true' : undefined}
+    >
+      <span className={classes.arrow} aria-hidden>
+        {ARROW[message.direction]}
+      </span>
+      <pre className={classes.payload}>
+        <VisuallyHidden>{LABEL[message.direction]}: </VisuallyHidden>
+        {message.data}
+      </pre>
+      <span className={classes.meta}>
+        <span>{formatTime(message.timestamp)}</span>
+        {message.direction !== 'system' && (
+          <span>
+            {message.payloadType.toUpperCase()} · {formatSize(message.sizeBytes)}
+          </span>
+        )}
+      </span>
+    </div>
+  );
+});
+
+/**
  * The connection's message history, oldest first. It follows new messages automatically, but
  * stops doing so as soon as the user scrolls up to read something, and resumes at the bottom.
  */
@@ -128,30 +158,7 @@ export const MessageList = memo(function MessageList({ messages, status, onClear
             </Stack>
           </Center>
         ) : (
-          messages.map((message) => (
-            <div
-              key={message.id}
-              className={classes.message}
-              data-direction={message.direction}
-              data-error={message.error ? 'true' : undefined}
-            >
-              <span className={classes.arrow} aria-hidden>
-                {ARROW[message.direction]}
-              </span>
-              <pre className={classes.payload}>
-                <VisuallyHidden>{LABEL[message.direction]}: </VisuallyHidden>
-                {message.data}
-              </pre>
-              <span className={classes.meta}>
-                <span>{formatTime(message.timestamp)}</span>
-                {message.direction !== 'system' && (
-                  <span>
-                    {message.payloadType.toUpperCase()} · {formatSize(message.sizeBytes)}
-                  </span>
-                )}
-              </span>
-            </div>
-          ))
+          messages.map((message) => <MessageRow key={message.id} message={message} />)
         )}
       </div>
     </div>

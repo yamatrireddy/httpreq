@@ -1,7 +1,12 @@
 import { describe, expect, it } from 'vitest';
 import { createEmptyRequest, createSshProfile, createWebSocketRequest } from '@httpreq/shared';
 import { createDefaultWorkspace, createWorkspace } from '@httpreq/workspace';
-import { KeyValueHistoryRepository, KeyValueWorkspaceRepository } from './repository';
+import {
+  KeyValueHistoryRepository,
+  KeyValueWorkspaceRepository,
+  REQUEST_KEY,
+  SOCKET_KEY,
+} from './repository';
 import { migrateLegacyStorage } from './index';
 import { MemoryStore, WebStorageStore } from './store';
 
@@ -138,6 +143,142 @@ describe('KeyValueWorkspaceRepository', () => {
       url: 'wss://example.com/ws',
       subprotocols: ['json'],
     });
+  });
+});
+
+/** A memory store that records which keys each save wrote and deleted. */
+class RecordingStore extends MemoryStore {
+  sets: string[] = [];
+  deletes: string[] = [];
+
+  override async batch(operations: Parameters<MemoryStore['batch']>[0]) {
+    this.sets.push(...(operations.set ?? []).map(([key]) => key));
+    this.deletes.push(...(operations.delete ?? []));
+    await super.batch(operations);
+  }
+
+  reset() {
+    this.sets = [];
+    this.deletes = [];
+  }
+}
+
+const requestNamed = (name: string, parentId: string | null = null) => ({
+  ...createEmptyRequest(parentId),
+  name,
+});
+
+describe('incremental workspace writes', () => {
+  it('rewrites only the requests that changed, together with the shell', async () => {
+    const store = new RecordingStore();
+    const workspaces = new KeyValueWorkspaceRepository(store);
+    const [a, b, c] = [requestNamed('A'), requestNamed('B'), requestNamed('C')];
+    const workspace = { ...createWorkspace('Big'), requests: [a, b, c] };
+    await workspaces.saveWorkspace(workspace);
+    expect(store.sets).toEqual(
+      expect.arrayContaining([
+        REQUEST_KEY(workspace.id, a.id),
+        REQUEST_KEY(workspace.id, b.id),
+        REQUEST_KEY(workspace.id, c.id),
+        `workspace.${workspace.id}`,
+      ]),
+    );
+
+    store.reset();
+    const edited = { ...b, url: 'https://example.com/b' };
+    await workspaces.saveWorkspace({ ...workspace, requests: [a, edited, c] });
+    expect(store.sets).toEqual([REQUEST_KEY(workspace.id, b.id), `workspace.${workspace.id}`]);
+
+    // A structural change that touches no request (tab order, say) writes the shell alone.
+    store.reset();
+    await workspaces.saveWorkspace({
+      ...workspace,
+      requests: [a, edited, c],
+      openRequestIds: [c.id],
+    });
+    expect(store.sets).toEqual([`workspace.${workspace.id}`]);
+
+    const loaded = await workspaces.getWorkspace(workspace.id);
+    expect(loaded?.requests.map((request) => request.name)).toEqual(['A', 'B', 'C']);
+    expect(loaded?.requests[1]?.url).toBe('https://example.com/b');
+    expect(loaded?.openRequestIds).toEqual([c.id]);
+  });
+
+  it('keeps tree order and removes the records of deleted requests', async () => {
+    const store = new RecordingStore();
+    const workspaces = new KeyValueWorkspaceRepository(store);
+    const [a, b, c] = [requestNamed('A'), requestNamed('B'), requestNamed('C')];
+    const workspace = { ...createWorkspace('Tree'), requests: [a, b, c] };
+    await workspaces.saveWorkspace(workspace);
+
+    store.reset();
+    await workspaces.saveWorkspace({ ...workspace, requests: [c, a] });
+    expect(store.deletes).toEqual([REQUEST_KEY(workspace.id, b.id)]);
+    expect(await store.get(REQUEST_KEY(workspace.id, b.id))).toBeNull();
+    const loaded = await workspaces.getWorkspace(workspace.id);
+    expect(loaded?.requests.map((request) => request.name)).toEqual(['C', 'A']);
+  });
+
+  it('after a restart, a save writes only what differs from what was loaded', async () => {
+    const store = new RecordingStore();
+    const [a, b] = [requestNamed('A'), requestNamed('B')];
+    const workspace = { ...createWorkspace('Reloaded'), requests: [a, b] };
+    await new KeyValueWorkspaceRepository(store).saveWorkspace(workspace);
+
+    const restarted = new KeyValueWorkspaceRepository(store);
+    const loaded = (await restarted.getWorkspace(workspace.id))!;
+    store.reset();
+    await restarted.saveWorkspace({ ...loaded, name: 'Renamed' });
+    expect(store.sets).toEqual([`workspace.${workspace.id}`]);
+  });
+
+  it('a repository that never loaded the workspace still removes stale records', async () => {
+    const store = new RecordingStore();
+    const [a, b] = [requestNamed('A'), requestNamed('B')];
+    const workspace = { ...createWorkspace('Stale'), requests: [a, b] };
+    await new KeyValueWorkspaceRepository(store).saveWorkspace(workspace);
+
+    await new KeyValueWorkspaceRepository(store).saveWorkspace({ ...workspace, requests: [a] });
+    expect(await store.get(REQUEST_KEY(workspace.id, b.id))).toBeNull();
+  });
+
+  it('reads the single-record layout and converts it on the next save', async () => {
+    const store = new MemoryStore();
+    const request = requestNamed('Legacy');
+    const socket = { ...createWebSocketRequest(null), name: 'Legacy socket' };
+    const legacy = {
+      ...createWorkspace('Old layout'),
+      requests: [request],
+      websocketRequests: [socket],
+    };
+    // How the first releases stored a workspace: one value holding every request.
+    await store.set(`workspace.${legacy.id}`, legacy);
+
+    const workspaces = new KeyValueWorkspaceRepository(store);
+    const loaded = (await workspaces.getWorkspace(legacy.id))!;
+    expect(loaded.requests.map((item) => item.name)).toEqual(['Legacy']);
+
+    await workspaces.saveWorkspace(loaded);
+    const shell = (await store.get(`workspace.${legacy.id}`)) as Record<string, unknown>;
+    expect(shell.requests).toBeUndefined();
+    expect(shell.requestIds).toEqual([request.id]);
+    expect(await store.get(REQUEST_KEY(legacy.id, request.id))).toMatchObject({ name: 'Legacy' });
+    expect(await store.get(SOCKET_KEY(legacy.id, socket.id))).toMatchObject({
+      name: 'Legacy socket',
+    });
+    expect(
+      (await new KeyValueWorkspaceRepository(store).getWorkspace(legacy.id))?.requests,
+    ).toEqual(loaded.requests);
+  });
+
+  it('deleting a workspace removes its request records', async () => {
+    const store = new MemoryStore();
+    const workspaces = new KeyValueWorkspaceRepository(store);
+    const request = requestNamed('Gone');
+    const workspace = { ...createWorkspace('Doomed'), requests: [request] };
+    await workspaces.saveWorkspace(workspace);
+    await workspaces.deleteWorkspace(workspace.id);
+    expect(await store.keys(`request.${workspace.id}.`)).toEqual([]);
   });
 });
 

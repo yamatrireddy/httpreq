@@ -5,6 +5,7 @@ import {
   createEnvironment,
   createFolder,
   createId,
+  deepEqual,
   createSshProfile as newSshProfile,
   createTunnelProfile as newTunnelProfile,
   createWebSocketRequest as newSocketRequest,
@@ -176,7 +177,7 @@ const touch = (workspace: Workspace, patch: Partial<Workspace>): Workspace => ({
   updatedAt: new Date().toISOString(),
 });
 
-const same = (a: HttpRequest, b: HttpRequest) => a === b || JSON.stringify(a) === JSON.stringify(b);
+const same = (a: HttpRequest, b: HttpRequest) => deepEqual(a, b);
 
 /** The version of a request the editor shows: its draft if it has unsaved edits. */
 export const editableRequest = (
