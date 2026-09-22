@@ -1,12 +1,23 @@
 import type { AuthConfig } from '@httpreq/shared';
 import { isTemplateOnly } from '../variables';
+
+/** How a credential is shown in a header preview: a variable reference as written, else masked. */
+export const maskedCredential = (value: string, placeholder = '<token>') => {
+  const trimmed = value.trim();
+  if (!trimmed) return placeholder;
+  return isTemplateOnly(trimmed) ? trimmed : '••••••••';
+};
+
+/** `<prefix> <credential>`, or the credential alone when the prefix is blank. */
+export const withPrefix = (prefix: string, credential: string) =>
+  prefix.trim() ? `${prefix.trim()} ${credential}` : credential;
 import type { AuthContext, AuthProvider } from './types';
 
 type Definition<C extends AuthConfig> = Omit<
   AuthProvider<C>,
-  'resolve' | 'serialize' | 'deserialize' | 'validate' | 'appliedHeaders'
+  'resolve' | 'serialize' | 'deserialize' | 'validate' | 'appliedHeaders' | 'previewHeaders'
 > &
-  Partial<Pick<AuthProvider<C>, 'validate' | 'appliedHeaders'>> & {
+  Partial<Pick<AuthProvider<C>, 'validate' | 'appliedHeaders' | 'previewHeaders'>> & {
     /** Allowed values of enumerated fields; anything else falls back to the default. */
     enums?: Partial<Record<keyof C & string, readonly unknown[]>>;
     /** Fields that are never variable-substituted (e.g. enumerations). */
@@ -29,6 +40,15 @@ export const defineProvider = <C extends AuthConfig>(
   return {
     validate: () => [],
     appliedHeaders: () => [],
+    // Unless a scheme says more, its headers are known by name only.
+    previewHeaders(config: C) {
+      return Object.fromEntries(
+        (provider.appliedHeaders?.(config) ?? []).map((name) => [
+          name,
+          '<calculated when the request is sent>',
+        ]),
+      );
+    },
     ...provider,
     resolve(config: C, context: AuthContext): C {
       const resolved: Record<string, unknown> = { ...config };

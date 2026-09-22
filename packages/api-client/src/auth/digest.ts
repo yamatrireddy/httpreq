@@ -93,6 +93,9 @@ export const digestAuthProvider = defineProvider<DigestAuth>({
       ? []
       : [{ field: 'username', message: 'Enter a username.', severity: 'warning' }],
   appliedHeaders: () => ['Authorization'],
+  previewHeaders: () => ({
+    Authorization: 'Digest <computed from the server’s 401 challenge; sent on the retry>',
+  }),
   applyToRequest: () => undefined,
   async handleChallenge(config, request, response) {
     if (response.status !== 401) return null;

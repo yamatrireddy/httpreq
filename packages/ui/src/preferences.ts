@@ -14,6 +14,8 @@ export interface WorkspacePreferences {
   /** Sidebar width in pixels (activity rail plus explorer). */
   sidebarWidth: number;
   statusBarVisible: boolean;
+  /** Whether the Headers tab lists the headers added automatically when a request is sent. */
+  generatedHeadersVisible: boolean;
 }
 
 interface PreferencesState extends WorkspacePreferences {
@@ -22,6 +24,7 @@ interface PreferencesState extends WorkspacePreferences {
   toggleSidebar: () => void;
   setSidebarWidth: (width: number) => void;
   toggleStatusBar: () => void;
+  setGeneratedHeadersVisible: (visible: boolean) => void;
 }
 
 export const PREFERENCES_KEY = 'httpreq.preferences';
@@ -41,6 +44,7 @@ export const defaultPreferences = (): WorkspacePreferences => ({
   sidebarVisible: true,
   sidebarWidth: DEFAULT_SIDEBAR_WIDTH,
   statusBarVisible: true,
+  generatedHeadersVisible: true,
 });
 
 export const clampRatio = (ratio: number) =>
@@ -80,6 +84,10 @@ export const parsePreferences = (raw: string | null): WorkspacePreferences => {
       typeof stored.statusBarVisible === 'boolean'
         ? stored.statusBarVisible
         : defaults.statusBarVisible,
+    generatedHeadersVisible:
+      typeof stored.generatedHeadersVisible === 'boolean'
+        ? stored.generatedHeadersVisible
+        : defaults.generatedHeadersVisible,
   };
 };
 
@@ -107,6 +115,7 @@ export const usePreferences = create<PreferencesState>((set) => ({
   toggleSidebar: () => set((state) => ({ sidebarVisible: !state.sidebarVisible })),
   setSidebarWidth: (width) => set({ sidebarWidth: clampSidebarWidth(width) }),
   toggleStatusBar: () => set((state) => ({ statusBarVisible: !state.statusBarVisible })),
+  setGeneratedHeadersVisible: (generatedHeadersVisible) => set({ generatedHeadersVisible }),
 }));
 
 const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
@@ -115,6 +124,7 @@ const snapshot = (state: WorkspacePreferences): WorkspacePreferences => ({
   sidebarVisible: state.sidebarVisible,
   sidebarWidth: state.sidebarWidth,
   statusBarVisible: state.statusBarVisible,
+  generatedHeadersVisible: state.generatedHeadersVisible,
 });
 
 // Writes are debounced so bursts of changes (e.g. keyboard-resizing the splitter) cost one write.
@@ -136,7 +146,8 @@ usePreferences.subscribe((state, previous) => {
     state.splitRatio !== previous.splitRatio ||
     state.sidebarVisible !== previous.sidebarVisible ||
     state.sidebarWidth !== previous.sidebarWidth ||
-    state.statusBarVisible !== previous.statusBarVisible
+    state.statusBarVisible !== previous.statusBarVisible ||
+    state.generatedHeadersVisible !== previous.generatedHeadersVisible
   ) {
     persist(state);
   }

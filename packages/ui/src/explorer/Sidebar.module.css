@@ -74,12 +74,17 @@
   min-height: 0;
 }
 
+/* Exactly the height of the request tab strip, rule included, so the two read as one line
+   across the window whichever sidebar view is open. */
 .panelHeader {
   display: flex;
+  flex: 0 0 auto;
   align-items: center;
   gap: 2px;
-  height: 34px;
+  box-sizing: border-box;
+  height: var(--hr-strip-height);
   padding: 0 6px 0 12px;
+  border-bottom: 1px solid var(--mantine-color-default-border);
 }
 
 .panelTitle {

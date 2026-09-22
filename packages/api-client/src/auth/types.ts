@@ -77,6 +77,11 @@ export interface AuthProvider<C extends AuthConfig = AuthConfig> {
   applyToRequest(config: C, request: RequestDraft, context: AuthContext): void | Promise<void>;
   /** Header names this scheme writes, used to flag conflicts with manually configured headers. */
   appliedHeaders(config: C): string[];
+  /**
+   * The headers this scheme will add, for display. Values never contain a credential: a literal
+   * secret is masked, while a `{{variable}}` reference is shown as written.
+   */
+  previewHeaders(config: C): Record<string, string>;
   /** Answers an authentication challenge (e.g. a Digest 401) with a request to retry once. */
   handleChallenge?(
     config: C,

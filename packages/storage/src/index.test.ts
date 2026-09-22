@@ -45,7 +45,8 @@ describe('LocalWorkspaceRepository', () => {
       secret: true,
     });
     await repository.saveWorkspace(workspace);
-    const written = [...values.values()][0]!;
+    // Every record the save wrote: the workspace shell, each request and the index.
+    const written = [...values.values()].join('\n');
     for (const secret of ['never-write-this', 'hidden-header', 'hunter2', 'env-secret']) {
       expect(written).not.toContain(secret);
     }

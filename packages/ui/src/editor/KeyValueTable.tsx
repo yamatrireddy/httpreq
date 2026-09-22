@@ -7,13 +7,38 @@ import {
   Text,
   Textarea,
   Tooltip,
+  UnstyledButton,
 } from '@mantine/core';
-import { IconCopy, IconLock, IconLockOpen, IconTrash } from '@tabler/icons-react';
+import {
+  IconChevronRight,
+  IconCopy,
+  IconLock,
+  IconLockOpen,
+  IconPencilPlus,
+  IconShieldLock,
+  IconTrash,
+} from '@tabler/icons-react';
 import { memo, useState, type ReactNode } from 'react';
 import { createId, type KeyValueItem } from '@httpreq/shared';
 import { VariableInput } from './VariableInput';
 import { fromBulkText, toBulkText } from './bulk';
 import classes from './KeyValueTable.module.css';
+
+/**
+ * A row the user cannot edit, shown in the same grid as the editable rows so the columns line up:
+ * e.g. a header the authorization or the HTTP client adds when the request is sent.
+ */
+export interface LockedRow {
+  id: string;
+  key: string;
+  value: string;
+  /** Shown in the description column: where the row comes from. */
+  description: string;
+  /** Set when an editable row takes this one's place; the row is shown struck through. */
+  overriddenBy?: string;
+  /** Offered when an editable row may replace this one: adds that row. */
+  onOverride?: () => void;
+}
 
 export interface KeyValueTableProps<T extends KeyValueItem> {
   items: T[];
@@ -35,6 +60,13 @@ export interface KeyValueTableProps<T extends KeyValueItem> {
   renderRowExtras?: (item: T, update: (patch: Partial<T>) => void) => ReactNode;
   /** Message shown in a row, e.g. that the header is replaced by authorization. */
   rowNote?: (item: T) => string | undefined;
+  /** Read-only rows listed above the editable ones, under a heading that shows or hides them. */
+  lockedRows?: readonly LockedRow[];
+  /** Heading of the locked rows, e.g. "Auto-generated headers". */
+  lockedLabel?: string;
+  lockedHint?: string;
+  lockedVisible?: boolean;
+  onLockedVisibleChange?: (visible: boolean) => void;
 }
 
 const defaultCreate = (patch: Partial<KeyValueItem>) =>
@@ -59,6 +91,11 @@ function KeyValueTableInner<T extends KeyValueItem>({
   renderValue,
   renderRowExtras,
   rowNote,
+  lockedRows,
+  lockedLabel = 'Locked',
+  lockedHint,
+  lockedVisible = true,
+  onLockedVisibleChange,
 }: KeyValueTableProps<T>) {
   const [ghostId, setGhostId] = useState(createId);
   const [bulk, setBulk] = useState<string | null>(null);
@@ -116,6 +153,7 @@ function KeyValueTableInner<T extends KeyValueItem>({
   }
 
   const rows = [...items, { ...createRow({ id: ghostId }) }];
+  const lockedCount = lockedRows?.filter((row) => !row.overriddenBy).length ?? 0;
 
   return (
     <div className={classes.root}>
@@ -158,6 +196,81 @@ function KeyValueTableInner<T extends KeyValueItem>({
             )}
           </span>
         </div>
+        {lockedRows && lockedRows.length > 0 && (
+          <div role="row" className={classes.groupRow}>
+            <span role="cell" className={classes.groupCell}>
+              <UnstyledButton
+                className={classes.groupToggle}
+                aria-expanded={lockedVisible}
+                onClick={() => onLockedVisibleChange?.(!lockedVisible)}
+              >
+                <IconChevronRight
+                  size={13}
+                  className={classes.groupChevron}
+                  data-open={lockedVisible || undefined}
+                  aria-hidden
+                />
+                {lockedLabel}
+                <span className={classes.groupCount}>{lockedCount}</span>
+              </UnstyledButton>
+              {lockedHint && (
+                <Text component="span" size="xs" c="dimmed" className={classes.groupHint}>
+                  {lockedHint}
+                </Text>
+              )}
+            </span>
+          </div>
+        )}
+        {lockedVisible &&
+          lockedRows?.map((row) => (
+            <div
+              key={row.id}
+              role="row"
+              className={classes.row}
+              data-locked
+              data-overridden={row.overriddenBy ? true : undefined}
+            >
+              <span role="cell" className={classes.check}>
+                <Tooltip label="Added automatically; not editable" openDelay={300}>
+                  <IconShieldLock size={13} className={classes.lockIcon} aria-label="Read-only" />
+                </Tooltip>
+              </span>
+              <span role="cell" className={classes.cell}>
+                <span className={classes.lockedText} title={row.key}>
+                  {row.key}
+                </span>
+              </span>
+              <span role="cell" className={classes.cell}>
+                <span className={classes.lockedText} title={row.value}>
+                  {row.value}
+                </span>
+              </span>
+              {showDescription && (
+                <span role="cell" className={`${classes.cell} ${classes.description}`}>
+                  <span className={classes.lockedNote} title={row.description}>
+                    {row.overriddenBy
+                      ? `Replaced by your “${row.overriddenBy}” header`
+                      : row.description}
+                  </span>
+                </span>
+              )}
+              <span role="cell" className={classes.actions}>
+                {row.onOverride && !row.overriddenBy && (
+                  <Tooltip label="Override: add an editable copy">
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="sm"
+                      aria-label={`Override ${row.key}`}
+                      onClick={row.onOverride}
+                    >
+                      <IconPencilPlus size={14} />
+                    </ActionIcon>
+                  </Tooltip>
+                )}
+              </span>
+            </div>
+          ))}
         {rows.map((item) => {
           const ghost = item.id === ghostId;
           const patch = (value: Partial<T>) => update(item.id, value);

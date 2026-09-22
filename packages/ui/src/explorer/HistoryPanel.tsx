@@ -2,6 +2,7 @@ import { Button, Text, UnstyledButton } from '@mantine/core';
 import { Fragment, useMemo } from 'react';
 import { methodColor } from '../methods';
 import { useWorkbenchStore } from '../store';
+import { PanelHeader } from './PanelHeader';
 import classes from './Sidebar.module.css';
 
 const dayLabel = (date: Date) => {
@@ -31,16 +32,13 @@ export function HistoryPanel({
   let lastDay = '';
   return (
     <div className={classes.explorer}>
-      <div className={classes.panelHeader}>
-        <Text component="h2" className={classes.panelTitle}>
-          History
-        </Text>
+      <PanelHeader title="History">
         {history.length > 0 && (
           <Button size="compact-xs" variant="subtle" color="gray" onClick={onClear}>
             Clear
           </Button>
         )}
-      </div>
+      </PanelHeader>
       <div className={classes.tree} role="list" aria-label="Request history">
         {history.length === 0 && (
           <Text size="xs" c="dimmed" px={12} py={4}>

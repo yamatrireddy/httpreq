@@ -185,26 +185,6 @@
   min-height: 0;
 }
 
-.tabList {
-  flex: 0 0 auto;
-  flex-wrap: nowrap;
-  overflow-x: auto;
-  overflow-y: hidden;
-  padding: 0 6px;
-  scrollbar-width: none;
-}
-
-.tabList::-webkit-scrollbar {
-  display: none;
-}
-
-.tabList :global(.mantine-Tabs-tab) {
-  flex: 0 0 auto;
-  padding: 7px 10px;
-  font-size: 12.5px;
-  white-space: nowrap;
-}
-
 .count {
   display: inline-grid;
   place-items: center;

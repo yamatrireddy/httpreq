@@ -2,19 +2,26 @@ import { Badge, Tabs } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
 import { useCallback, useMemo, type Ref } from 'react';
 import {
-  authProviders,
   findHeaderConflicts,
+  previewGeneratedHeaders,
   resolveEffectiveAuth,
   resolveInheritedAuth,
 } from '@httpreq/api-client';
-import type { HttpMethod, HttpRequest, KeyValueItem } from '@httpreq/shared';
+import {
+  createKeyValue,
+  type HttpMethod,
+  type HttpRequest,
+  type KeyValueItem,
+} from '@httpreq/shared';
 import { getAncestors, paramsFromUrl, urlWithParams } from '@httpreq/workspace';
 import { AuthorizationPanel } from '../auth/AuthorizationPanel';
+import { ScrollableTabsList } from '../ScrollableTabsList';
 import { downloadJson, exportCollection, exportRequest, fileNameFor } from '../exchange';
+import { usePreferences } from '../preferences';
 import { activeEnvironment, editableRequest, useWorkbenchStore, type EditorTab } from '../store';
 import { BodyPanel } from './BodyPanel';
 import { Breadcrumb } from './Breadcrumb';
-import { KeyValueTable } from './KeyValueTable';
+import { KeyValueTable, type LockedRow } from './KeyValueTable';
 import { OverviewPanel } from './OverviewPanel';
 import { ScriptsPanel } from './ScriptsPanel';
 import { SettingsPanel } from './SettingsPanel';
@@ -108,6 +115,27 @@ export function RequestEditor({
     [request, effectiveAuth],
   );
 
+  /*
+   * Headers added when the request is sent, as the Headers tab lists them. Only computed while
+   * that tab is open (panels are not kept mounted), and only from what they depend on.
+   */
+  const showGenerated = usePreferences((state) => state.generatedHeadersVisible);
+  const setShowGenerated = usePreferences((state) => state.setGeneratedHeadersVisible);
+  const environment = activeEnvironment(workspace);
+  const generated = useMemo(
+    () =>
+      request && tab === 'headers'
+        ? previewGeneratedHeaders(request, {
+            workspace,
+            environment,
+            runtime: desktop ? 'electron' : 'browser',
+            userAgent: typeof navigator === 'undefined' ? undefined : navigator.userAgent,
+            origin: desktop || typeof location === 'undefined' ? undefined : location.origin,
+          })
+        : [],
+    [request, tab, workspace, environment, desktop],
+  );
+
   const copyCurl = useCallback(async () => {
     if (!request) return;
     try {
@@ -128,8 +156,32 @@ export function RequestEditor({
   const paramCount = countEnabled(request.params);
   const headerCount = countEnabled(request.headers);
   const collection = path[0]?.kind === 'collection' ? path[0].node : undefined;
-  const conflictSet = new Set(conflicts.map((name) => name.toLowerCase()));
-  const environment = activeEnvironment(workspace);
+  // What happens to a typed header that a generated one will not give way to.
+  const replaced = new Map(
+    generated
+      .filter((header) => header.replacesManual)
+      .map((header) => [header.name.toLowerCase(), header.replacesManual!]),
+  );
+  const lockedRows: LockedRow[] = generated.map((header) => ({
+    id: `generated-${header.name}`,
+    key: header.name,
+    value: header.value,
+    description: header.note,
+    overriddenBy: header.overriddenBy,
+    onOverride: header.overridable
+      ? () =>
+          onChange({
+            headers: [
+              ...request.headers,
+              createKeyValue({
+                key: header.name,
+                // A described value (in angle brackets) is not a value to send.
+                value: header.value.startsWith('<') ? '' : header.value,
+              }),
+            ],
+          })
+      : undefined,
+  }));
 
   return (
     <div className={classes.editorRoot}>
@@ -163,7 +215,7 @@ export function RequestEditor({
         className={`request-config ${classes.tabs}`}
         activateTabWithKeyboard
       >
-        <Tabs.List className={classes.tabList} aria-label="Request editor">
+        <ScrollableTabsList active={tab} aria-label="Request editor">
           <Tabs.Tab value="overview">Overview</Tabs.Tab>
           <Tabs.Tab value="params">
             Params <Count value={paramCount} />
@@ -189,7 +241,7 @@ export function RequestEditor({
           </Tabs.Tab>
           <Tabs.Tab value="sharing">Sharing</Tabs.Tab>
           <Tabs.Tab value="settings">Settings</Tabs.Tab>
-        </Tabs.List>
+        </ScrollableTabsList>
 
         <Tabs.Panel value="overview" className={classes.panel}>
           <OverviewPanel
@@ -221,10 +273,17 @@ export function RequestEditor({
             keySuggestions={COMMON_HEADERS}
             allowSecret
             rowNote={(item) =>
-              item.enabled && conflictSet.has(item.key.trim().toLowerCase())
-                ? `Replaced by the ${authProviders[effectiveAuth.auth.type].label} authorization, so it is not sent twice.`
-                : undefined
+              item.enabled ? replaced.get(item.key.trim().toLowerCase()) : undefined
             }
+            lockedRows={lockedRows}
+            lockedLabel="Auto-generated"
+            lockedHint={
+              desktop
+                ? 'Added when the request is sent'
+                : 'Added when the request is sent; the browser may add a few more'
+            }
+            lockedVisible={showGenerated}
+            onLockedVisibleChange={setShowGenerated}
           />
         </Tabs.Panel>
         <Tabs.Panel value="authorization" className={classes.panel}>

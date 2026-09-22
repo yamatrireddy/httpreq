@@ -24,6 +24,7 @@ import { createId, type EnvironmentVariable } from '@httpreq/shared';
 import { confirmAction } from '../confirm';
 import { KeyValueTable } from '../editor/KeyValueTable';
 import { useWorkbenchStore } from '../store';
+import { PanelHeader } from './PanelHeader';
 import classes from './Sidebar.module.css';
 
 export function EnvironmentsPanel() {
@@ -44,10 +45,7 @@ export function EnvironmentsPanel() {
 
   return (
     <div className={classes.explorer}>
-      <div className={classes.panelHeader}>
-        <Text component="h2" className={classes.panelTitle}>
-          Environments
-        </Text>
+      <PanelHeader title="Environments">
         <Tooltip label="New environment">
           <ActionIcon
             variant="subtle"
@@ -59,8 +57,8 @@ export function EnvironmentsPanel() {
             <IconPlus size={15} />
           </ActionIcon>
         </Tooltip>
-      </div>
-      <Text size="xs" c="dimmed" px={12} pb={6}>
+      </PanelHeader>
+      <Text size="xs" c="dimmed" px={12} py={6}>
         The active environment resolves <code>{'{{variables}}'}</code> when a request is sent.
       </Text>
       <Radio.Group
