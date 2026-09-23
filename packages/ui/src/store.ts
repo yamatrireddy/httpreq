@@ -84,6 +84,14 @@ interface WorkbenchState {
    */
   openSshSessionIds: string[];
   activeSshSessionId: string | null;
+  /**
+   * Environment editor tabs, in tab order, after the request tabs. Like terminals they are not
+   * persisted; unlike requests there is nothing unsaved to restore, as every edit is committed.
+   */
+  openEnvironmentTabIds: string[];
+  activeEnvironmentTabId: string | null;
+  /** An environment just created, whose editor should start with its name selected. */
+  namingEnvironmentId: string | null;
 
   load: (
     workspace: Workspace,
@@ -136,11 +144,18 @@ interface WorkbenchState {
   /* Environments */
   createEnvironment: () => string;
   updateEnvironment: (id: string, patch: Partial<Omit<Environment, 'id'>>) => void;
-  duplicateEnvironment: (id: string) => void;
+  /** Returns the copy's id, or null when there is no such environment. */
+  duplicateEnvironment: (id: string) => string | null;
   deleteEnvironment: (id: string) => void;
   setActiveEnvironment: (id: string | null) => void;
   /** Creates or updates a variable in the active environment (e.g. a retrieved OAuth token). */
   setEnvironmentVariable: (key: string, value: string, secret: boolean) => boolean;
+  /* Environment editor tabs */
+  openEnvironmentTab: (id: string, options?: { naming?: boolean }) => void;
+  closeEnvironmentTabs: (ids: Iterable<string>) => void;
+  setActiveEnvironmentTab: (id: string | null) => void;
+  moveEnvironmentTab: (id: string, toIndex: number) => void;
+  clearNamingEnvironment: () => void;
   setHistory: (history: HistoryEntry[]) => void;
   /* SSH terminal tabs (desktop only) */
   openSshSession: (sessionId: string) => void;
@@ -249,6 +264,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
   editorTabs: {},
   openSshSessionIds: [],
   activeSshSessionId: null,
+  openEnvironmentTabIds: [],
+  activeEnvironmentTabId: null,
+  namingEnvironmentId: null,
 
   load: (workspace, drafts, history) => {
     const requestIds = new Set(workspace.requests.map((request) => request.id));
@@ -272,6 +290,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       // Terminals belong to the workspace that opened them and do not survive a switch.
       openSshSessionIds: [],
       activeSshSessionId: null,
+      openEnvironmentTabIds: [],
+      activeEnvironmentTabId: null,
+      namingEnvironmentId: null,
       selectedNodeId: active,
       expandedIds: new Set([
         ...workspace.collections.map((collection) => collection.id),
@@ -295,7 +316,8 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     set((state) => {
       if (!requestKind(state.workspace, id)) return state;
       const open = state.workspace.openRequestIds;
-      if (open.includes(id)) return { activeRequestId: id, selectedNodeId: id };
+      if (open.includes(id))
+        return { activeRequestId: id, selectedNodeId: id, activeEnvironmentTabId: null };
       const index = state.activeRequestId ? open.indexOf(state.activeRequestId) : -1;
       const openRequestIds = [...open];
       openRequestIds.splice(index >= 0 ? index + 1 : open.length, 0, id);
@@ -303,6 +325,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         workspace: touch(state.workspace, { openRequestIds }),
         activeRequestId: id,
         selectedNodeId: id,
+        activeEnvironmentTabId: null,
       };
     }),
 
@@ -329,6 +352,13 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
           .map((request) => request.id),
       );
       const active = state.activeRequestId;
+      const nextActive =
+        active !== null && closing.has(active) ? nearestOpen(open, closing, active) : active;
+      // Closing the last request tab moves on to an environment tab rather than to an empty pane.
+      const fallback =
+        active !== null && nextActive === null && !state.activeSshSessionId
+          ? (state.openEnvironmentTabIds[0] ?? null)
+          : null;
       return {
         workspace: touch(state.workspace, {
           openRequestIds,
@@ -345,12 +375,17 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
         }),
         drafts: without(state.drafts, closing),
         saveStatus: without(state.saveStatus, closing),
-        activeRequestId:
-          active !== null && closing.has(active) ? nearestOpen(open, closing, active) : active,
+        activeRequestId: nextActive,
+        ...(fallback ? { activeEnvironmentTabId: fallback } : {}),
       };
     }),
 
-  setActiveRequest: (activeRequestId) => set({ activeRequestId, selectedNodeId: activeRequestId }),
+  setActiveRequest: (activeRequestId) =>
+    set({
+      activeRequestId,
+      selectedNodeId: activeRequestId,
+      ...(activeRequestId ? { activeEnvironmentTabId: null } : {}),
+    }),
 
   cycleRequest: (offset) =>
     set((state) => {
@@ -358,7 +393,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       if (!open.length) return state;
       const index = state.activeRequestId ? open.indexOf(state.activeRequestId) : 0;
       const next = open[(((index + offset) % open.length) + open.length) % open.length];
-      return next ? { activeRequestId: next, selectedNodeId: next } : state;
+      return next
+        ? { activeRequestId: next, selectedNodeId: next, activeEnvironmentTabId: null }
+        : state;
     }),
 
   moveTab: (id, toIndex) =>
@@ -623,29 +660,31 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       }),
     })),
 
-  duplicateEnvironment: (id) =>
-    set((state) => {
-      const index = state.workspace.environments.findIndex((environment) => environment.id === id);
-      const source = state.workspace.environments[index];
-      if (!source) return state;
-      const copy: Environment = {
-        id: createId(),
-        name: `${source.name} (copy)`,
-        variables: source.variables.map((variable) => ({ ...variable, id: createId() })),
-      };
-      const environments = [...state.workspace.environments];
-      environments.splice(index + 1, 0, copy);
-      return { workspace: touch(state.workspace, { environments }) };
-    }),
+  duplicateEnvironment: (id) => {
+    const environments = [...get().workspace.environments];
+    const index = environments.findIndex((environment) => environment.id === id);
+    const source = environments[index];
+    if (!source) return null;
+    const copy: Environment = {
+      id: createId(),
+      name: `${source.name} (copy)`,
+      variables: source.variables.map((variable) => ({ ...variable, id: createId() })),
+    };
+    environments.splice(index + 1, 0, copy);
+    set((state) => ({ workspace: touch(state.workspace, { environments }) }));
+    return copy.id;
+  },
 
-  deleteEnvironment: (id) =>
+  deleteEnvironment: (id) => {
+    get().closeEnvironmentTabs([id]);
     set((state) => ({
       workspace: touch(state.workspace, {
         environments: state.workspace.environments.filter((environment) => environment.id !== id),
         activeEnvironmentId:
           state.workspace.activeEnvironmentId === id ? null : state.workspace.activeEnvironmentId,
       }),
-    })),
+    }));
+  },
 
   setActiveEnvironment: (activeEnvironmentId) =>
     set((state) => ({ workspace: touch(state.workspace, { activeEnvironmentId }) })),
@@ -666,16 +705,72 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
   setHistory: (history) => set({ history }),
 
+  /* ---------- Environment editor tabs ---------- */
+
+  openEnvironmentTab: (id, options) =>
+    set((state) => {
+      if (!state.workspace.environments.some((environment) => environment.id === id)) return state;
+      const open = state.openEnvironmentTabIds;
+      return {
+        openEnvironmentTabIds: open.includes(id) ? open : [...open, id],
+        activeEnvironmentTabId: id,
+        activeRequestId: null,
+        activeSshSessionId: null,
+        namingEnvironmentId: options?.naming ? id : state.namingEnvironmentId,
+      };
+    }),
+
+  closeEnvironmentTabs: (ids) =>
+    set((state) => {
+      const open = state.openEnvironmentTabIds;
+      const closing = new Set([...ids].filter((id) => open.includes(id)));
+      if (!closing.size) return state;
+      const remaining = open.filter((id) => !closing.has(id));
+      const active = state.activeEnvironmentTabId;
+      if (active === null || !closing.has(active)) return { openEnvironmentTabIds: remaining };
+      const next = nearestOpen(open, closing, active);
+      return {
+        openEnvironmentTabIds: remaining,
+        activeEnvironmentTabId: next,
+        // With no environment tab left, focus returns to a request tab, or else a terminal.
+        ...(next === null
+          ? state.workspace.openRequestIds.length
+            ? { activeRequestId: state.workspace.openRequestIds[0]! }
+            : { activeSshSessionId: state.openSshSessionIds[0] ?? null }
+          : {}),
+      };
+    }),
+
+  setActiveEnvironmentTab: (activeEnvironmentTabId) =>
+    set({
+      activeEnvironmentTabId,
+      ...(activeEnvironmentTabId ? { activeRequestId: null, activeSshSessionId: null } : {}),
+    }),
+
+  moveEnvironmentTab: (id, toIndex) =>
+    set((state) => {
+      const order = [...state.openEnvironmentTabIds];
+      const from = order.indexOf(id);
+      const target = Math.max(0, Math.min(toIndex, order.length - 1));
+      if (from < 0 || from === target) return state;
+      order.splice(from, 1);
+      order.splice(target, 0, id);
+      return { openEnvironmentTabIds: order };
+    }),
+
+  clearNamingEnvironment: () => set({ namingEnvironmentId: null }),
+
   /* ---------- SSH terminal tabs ---------- */
 
   openSshSession: (sessionId) =>
     set((state) =>
       state.openSshSessionIds.includes(sessionId)
-        ? { activeSshSessionId: sessionId, activeRequestId: null }
+        ? { activeSshSessionId: sessionId, activeRequestId: null, activeEnvironmentTabId: null }
         : {
             openSshSessionIds: [...state.openSshSessionIds, sessionId],
             activeSshSessionId: sessionId,
             activeRequestId: null,
+            activeEnvironmentTabId: null,
           },
     ),
 
@@ -699,7 +794,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }),
 
   setActiveSshSession: (activeSshSessionId) =>
-    set({ activeSshSessionId, ...(activeSshSessionId ? { activeRequestId: null } : {}) }),
+    set({
+      activeSshSessionId,
+      ...(activeSshSessionId ? { activeRequestId: null, activeEnvironmentTabId: null } : {}),
+    }),
 
   moveSshTab: (sessionId, toIndex) =>
     set((state) => {

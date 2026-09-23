@@ -315,3 +315,8 @@
     display: none;
   }
 }
+
+/* The environment whose tab is showing, like the open request in the collections tree. */
+.envRow[data-editing] .envName {
+  font-weight: 600;
+}

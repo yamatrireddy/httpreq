@@ -1,13 +1,10 @@
 import {
   ActionIcon,
   Button,
-  Group,
   Menu,
-  Modal,
   Radio,
   Stack,
   Text,
-  TextInput,
   Tooltip,
   UnstyledButton,
 } from '@mantine/core';
@@ -19,19 +16,31 @@ import {
   IconTrash,
   IconVariable,
 } from '@tabler/icons-react';
-import { useState } from 'react';
-import { createId, type EnvironmentVariable } from '@httpreq/shared';
 import { confirmAction } from '../confirm';
-import { KeyValueTable } from '../editor/KeyValueTable';
 import { useWorkbenchStore } from '../store';
 import { PanelHeader } from './PanelHeader';
 import classes from './Sidebar.module.css';
 
-export function EnvironmentsPanel() {
+interface Props {
+  /** Called after an environment's tab is opened (e.g. to close the mobile drawer). */
+  onOpened?: () => void;
+}
+
+/**
+ * Lists the environments and picks the active one. Editing happens in the environment's own tab
+ * beside the request tabs, so several can be open at once.
+ */
+export function EnvironmentsPanel({ onOpened }: Props) {
   const environments = useWorkbenchStore((state) => state.workspace.environments);
   const activeId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
+  const openTabId = useWorkbenchStore((state) => state.activeEnvironmentTabId);
   const actions = useWorkbenchStore.getState;
-  const [editingId, setEditingId] = useState<string | null>(null);
+
+  const edit = (id: string, naming = false) => {
+    actions().openEnvironmentTab(id, { naming });
+    onOpened?.();
+  };
+  const create = () => edit(actions().createEnvironment(), true);
 
   const remove = async (id: string, name: string) => {
     const result = await confirmAction({
@@ -52,7 +61,7 @@ export function EnvironmentsPanel() {
             color="gray"
             size="sm"
             aria-label="New environment"
-            onClick={() => setEditingId(actions().createEnvironment())}
+            onClick={create}
           >
             <IconPlus size={15} />
           </ActionIcon>
@@ -75,11 +84,14 @@ export function EnvironmentsPanel() {
               key={environment.id}
               className={classes.envRow}
               data-selected={environment.id === activeId || undefined}
+              data-editing={environment.id === openTabId || undefined}
             >
               <Radio value={environment.id} aria-label={`Use ${environment.name}`} size="xs" />
               <UnstyledButton
                 className={classes.envName}
-                onClick={() => setEditingId(environment.id)}
+                aria-current={environment.id === openTabId ? 'page' : undefined}
+                title={`Edit “${environment.name}” in a tab`}
+                onClick={() => edit(environment.id)}
               >
                 <IconVariable size={14} aria-hidden />
                 <span className={classes.rowName}>{environment.name}</span>
@@ -104,7 +116,7 @@ export function EnvironmentsPanel() {
                 <Menu.Dropdown>
                   <Menu.Item
                     leftSection={<IconPencil size={14} />}
-                    onClick={() => setEditingId(environment.id)}
+                    onClick={() => edit(environment.id)}
                   >
                     Edit variables
                   </Menu.Item>
@@ -132,83 +144,11 @@ export function EnvironmentsPanel() {
           <Text size="xs" c="dimmed">
             Create an environment such as “Development” with a <code>base_url</code> variable.
           </Text>
-          <Button
-            size="xs"
-            variant="light"
-            leftSection={<IconPlus size={14} />}
-            onClick={() => setEditingId(actions().createEnvironment())}
-          >
+          <Button size="xs" variant="light" leftSection={<IconPlus size={14} />} onClick={create}>
             New environment
           </Button>
         </Stack>
       )}
-      <EnvironmentDialog environmentId={editingId} onClose={() => setEditingId(null)} />
     </div>
-  );
-}
-
-function EnvironmentDialog({
-  environmentId,
-  onClose,
-}: {
-  environmentId: string | null;
-  onClose: () => void;
-}) {
-  const environment = useWorkbenchStore((state) =>
-    state.workspace.environments.find((item) => item.id === environmentId),
-  );
-  const activeId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
-  const update = useWorkbenchStore((state) => state.updateEnvironment);
-  const setActive = useWorkbenchStore((state) => state.setActiveEnvironment);
-
-  return (
-    <Modal opened={!!environment} onClose={onClose} title="Environment" size="xl">
-      {environment && (
-        <Stack gap="sm">
-          <Group align="flex-end" gap="sm">
-            <TextInput
-              label="Name"
-              value={environment.name}
-              onChange={(event) => update(environment.id, { name: event.currentTarget.value })}
-              onBlur={(event) =>
-                !event.currentTarget.value.trim() && update(environment.id, { name: 'Environment' })
-              }
-              style={{ flex: 1 }}
-            />
-            <Button
-              variant={environment.id === activeId ? 'light' : 'default'}
-              onClick={() => setActive(environment.id)}
-              disabled={environment.id === activeId}
-            >
-              {environment.id === activeId ? 'Active' : 'Set active'}
-            </Button>
-          </Group>
-          <KeyValueTable<EnvironmentVariable>
-            label="Variables"
-            keyPlaceholder="Variable"
-            items={environment.variables}
-            onChange={(variables) => update(environment.id, { variables })}
-            createRow={(patch) => ({
-              id: createId(),
-              key: '',
-              value: '',
-              enabled: true,
-              secret: false,
-              ...patch,
-            })}
-            allowSecret
-            showDescription={false}
-          />
-          <Text size="xs" c="dimmed">
-            Use a variable as <code>{'{{name}}'}</code> in URLs, parameters, headers, bodies and
-            authorization. Secret values are masked and kept only for this session; they are never
-            written to disk.
-          </Text>
-          <Group justify="flex-end">
-            <Button onClick={onClose}>Done</Button>
-          </Group>
-        </Stack>
-      )}
-    </Modal>
   );
 }
