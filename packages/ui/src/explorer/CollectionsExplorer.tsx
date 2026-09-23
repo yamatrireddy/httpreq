@@ -401,6 +401,7 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       tabbable={row.id === rovingId}
       unsaved={unsaved.has(row.id)}
       renaming={row.id === renamingId}
+      anyRenaming={renamingId !== null}
       dropTarget={drop === row.id}
       menuOpen={menuFor === row.id}
       handlers={handlers}
@@ -562,6 +563,8 @@ interface RowProps {
   tabbable: boolean;
   unsaved: boolean;
   renaming: boolean;
+  /** Whether any row (this one or, after "New folder", a new one) is being renamed. */
+  anyRenaming: boolean;
   dropTarget: boolean;
   menuOpen: boolean;
   handlers: RowHandlers;
@@ -574,6 +577,7 @@ const ExplorerRow = memo(function ExplorerRow({
   tabbable,
   unsaved,
   renaming,
+  anyRenaming,
   dropTarget,
   menuOpen,
   handlers,
@@ -683,6 +687,10 @@ const ExplorerRow = memo(function ExplorerRow({
           opened={menuOpen}
           onChange={(opened) => handlers.menuChange(row.id, opened)}
           position="bottom-end"
+          // Closing the menu hands focus back to its button 10ms later. When the chosen item opened
+          // a rename field ("Rename", "New folder", "New request"), that stole focus from the field,
+          // whose blur then committed the unchanged name and closed it before anyone could type.
+          returnFocus={!anyRenaming}
           withinPortal
           shadow="md"
           width={210}

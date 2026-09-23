@@ -315,3 +315,29 @@
     display: none;
   }
 }
+
+.envItem {
+  display: flex;
+  flex-direction: column;
+}
+
+.envChevron {
+  flex: none;
+  color: var(--mantine-color-dimmed);
+  transition: transform 100ms ease;
+}
+
+.envChevron[data-open] {
+  transform: rotate(90deg);
+}
+
+/* The inline editor under an environment's row. Named as a container so the variables table can
+   fit its columns to the sidebar rather than to the request pane it was sized for. */
+.envEditor {
+  container: env-editor / inline-size;
+  margin: 2px 0 8px;
+  padding: 8px 6px;
+  border: 1px solid var(--mantine-color-default-border);
+  border-radius: var(--mantine-radius-sm);
+  background: var(--mantine-color-body);
+}

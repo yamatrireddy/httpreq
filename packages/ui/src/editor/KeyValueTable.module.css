@@ -39,6 +39,19 @@
   }
 }
 
+/* Edited inline in the sidebar, key and value share what little width there is. */
+@container env-editor (max-width: 480px) {
+  .table {
+    --kv-columns: 26px minmax(52px, 1fr) minmax(60px, 1.2fr) auto;
+  }
+
+  .actions {
+    min-width: 0;
+    gap: 0;
+    padding: 0 2px;
+  }
+}
+
 .header > span {
   display: flex;
   align-items: center;
