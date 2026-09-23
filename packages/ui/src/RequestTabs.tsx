@@ -4,6 +4,7 @@ import {
   IconChevronLeft,
   IconChevronRight,
   IconPlus,
+  IconVariable,
   IconX,
 } from '@tabler/icons-react';
 import {
@@ -21,8 +22,8 @@ import type { HttpMethod } from '@httpreq/shared';
 import { methodColor, REQUEST_PANEL_ID, requestTabId } from './methods';
 import classes from './RequestTabs.module.css';
 
-/** What a tab can hold: an HTTP request, a WebSocket request, or an SSH terminal. */
-export type TabKind = 'request' | 'websocket' | 'ssh';
+/** What a tab can hold: an HTTP request, a WebSocket request, an environment or an SSH terminal. */
+export type TabKind = 'request' | 'websocket' | 'environment' | 'ssh';
 
 export interface TabItem {
   id: string;
@@ -455,8 +456,15 @@ function TabContextMenu({ target, requests, onClose, onRun }: ContextMenuProps) 
   );
 }
 
-/** The short kind badge at the left of a tab: an HTTP verb, or WS / SSH. */
+/** The short kind badge at the left of a tab: an HTTP verb, WS / SSH, or an environment's icon. */
 function TabBadge({ item }: { item: TabItem }) {
+  if (item.kind === 'environment') {
+    return (
+      <span className={classes.method} style={{ color: 'var(--mantine-color-teal-text)' }}>
+        <IconVariable size={14} aria-label="Environment" />
+      </span>
+    );
+  }
   const { label, color } =
     item.kind === 'websocket'
       ? { label: 'WS', color: 'violet' }

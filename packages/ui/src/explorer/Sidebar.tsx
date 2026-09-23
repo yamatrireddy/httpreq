@@ -133,7 +133,7 @@ export function Sidebar({ onClearHistory, onNavigate }: Props) {
         {view === 'collections' && (
           <CollectionsExplorer onOpenSettings={setSettingsId} onOpened={onNavigate} />
         )}
-        {view === 'environments' && <EnvironmentsPanel />}
+        {view === 'environments' && <EnvironmentsPanel onOpened={onNavigate} />}
         {view === 'history' && <HistoryPanel onClear={onClearHistory} onOpened={onNavigate} />}
         {view === 'ssh' && desktopViews && <SshPanel onOpened={onNavigate} />}
         {view === 'tunnels' && desktopViews && <TunnelsPanel />}

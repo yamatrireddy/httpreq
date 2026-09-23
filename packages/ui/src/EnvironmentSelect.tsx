@@ -1,5 +1,11 @@
 import { Menu, UnstyledButton } from '@mantine/core';
-import { IconCheck, IconChevronDown, IconSettings, IconVariable } from '@tabler/icons-react';
+import {
+  IconCheck,
+  IconChevronDown,
+  IconPencil,
+  IconSettings,
+  IconVariable,
+} from '@tabler/icons-react';
 import { memo } from 'react';
 import { usePreferences } from './preferences';
 import { useWorkbenchStore } from './store';
@@ -61,6 +67,14 @@ export const EnvironmentSelect = memo(function EnvironmentSelect() {
           </Menu.Item>
         ))}
         <Menu.Divider />
+        {active && (
+          <Menu.Item
+            leftSection={<IconPencil size={14} />}
+            onClick={() => useWorkbenchStore.getState().openEnvironmentTab(active.id)}
+          >
+            <span className={classes.itemName}>Edit “{active.name}”</span>
+          </Menu.Item>
+        )}
         <Menu.Item leftSection={<IconSettings size={14} />} onClick={manage}>
           Manage environments
         </Menu.Item>

@@ -54,6 +54,7 @@ import {
 import { AboutDialog, SettingsDialog, ShortcutsDialog } from './Dialogs';
 import { RequestEditor } from './editor/RequestEditor';
 import { EnvironmentSelect } from './EnvironmentSelect';
+import { EnvironmentEditor } from './environment/EnvironmentEditor';
 import { Sidebar } from './explorer/Sidebar';
 import { LayoutToggle } from './LayoutToggle';
 import type { MenuDefinition } from './MenuBar';
@@ -217,6 +218,10 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   const openIds = useWorkbenchStore((state) => state.workspace.openRequestIds);
   const openSshIds = useWorkbenchStore((state) => state.openSshSessionIds);
   const activeSshId = useWorkbenchStore((state) => state.activeSshSessionId);
+  const openEnvironmentTabIds = useWorkbenchStore((state) => state.openEnvironmentTabIds);
+  const activeEnvironmentTabId = useWorkbenchStore((state) => state.activeEnvironmentTabId);
+  const setActiveEnvironmentTab = useWorkbenchStore((state) => state.setActiveEnvironmentTab);
+  const moveEnvironmentTab = useWorkbenchStore((state) => state.moveEnvironmentTab);
   const sshSessions = useConnectionsStore((state) => state.sessions);
   const environments = useWorkbenchStore((state) => state.workspace.environments);
   const activeEnvironmentId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
@@ -259,8 +264,9 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   useConnectivityMonitor(probe);
 
   /*
-   * The tab strip holds three kinds of tab. Request tabs (HTTP and WebSocket) are ordered by the
-   * workspace's `openRequestIds` and persist; SSH terminals are ephemeral and follow them.
+   * The tab strip holds four kinds of tab, in three groups. Request tabs (HTTP and WebSocket) are
+   * ordered by the workspace's `openRequestIds` and persist; environment editors and then SSH
+   * terminals are ephemeral and follow them.
    *
    * Only saved, structural data is read here. Unsaved edits and live socket state are applied by
    * `WorkbenchTabs` itself: the shell must not re-render on every keystroke or socket message.
@@ -296,8 +302,19 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
     [openSshIds, sshSessions],
   );
 
-  const tabs = useMemo(() => [...requestTabs, ...sshTabs], [requestTabs, sshTabs]);
-  const activeTabId = activeSshId ?? activeId ?? '';
+  const environmentTabs = useMemo<TabItem[]>(() => {
+    const byId = new Map(environments.map((environment) => [environment.id, environment]));
+    return openEnvironmentTabIds.flatMap((id): TabItem[] => {
+      const environment = byId.get(id);
+      return environment ? [{ id, kind: 'environment', name: environment.name }] : [];
+    });
+  }, [environments, openEnvironmentTabIds]);
+
+  const tabs = useMemo(
+    () => [...requestTabs, ...environmentTabs, ...sshTabs],
+    [requestTabs, environmentTabs, sshTabs],
+  );
+  const activeTabId = activeSshId ?? activeEnvironmentTabId ?? activeId ?? '';
   const activeTab = tabs.find((tab) => tab.id === activeTabId);
   const activeName = activeTab?.name;
   const activeKind = activeTab?.kind;
@@ -417,29 +434,35 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
     return ok;
   }, [saveRequest]);
 
-  /** Activating any tab: an SSH terminal and a request tab are mutually exclusive. */
+  /** Activating any tab: at most one of a terminal, an environment or a request is active. */
   const activateTab = useCallback(
     (id: string) => {
-      if (useWorkbenchStore.getState().openSshSessionIds.includes(id)) setActiveSshSession(id);
+      const state = useWorkbenchStore.getState();
+      if (state.openSshSessionIds.includes(id)) setActiveSshSession(id);
+      else if (state.openEnvironmentTabIds.includes(id)) setActiveEnvironmentTab(id);
       else {
         setActiveSshSession(null);
         setActiveRequest(id);
       }
     },
-    [setActiveRequest, setActiveSshSession],
+    [setActiveRequest, setActiveSshSession, setActiveEnvironmentTab],
   );
 
   const moveTabAnyKind = useCallback(
     (id: string, toIndex: number) => {
       const state = useWorkbenchStore.getState();
-      // SSH tabs sit after the request tabs, so their target index is relative to that group.
+      // Environment tabs follow the request tabs and SSH tabs follow both, so a target index is
+      // relative to the tab's own group.
+      const requestCount = state.workspace.openRequestIds.length;
       if (state.openSshSessionIds.includes(id)) {
-        moveSshTab(id, toIndex - state.workspace.openRequestIds.length);
+        moveSshTab(id, toIndex - requestCount - state.openEnvironmentTabIds.length);
+      } else if (state.openEnvironmentTabIds.includes(id)) {
+        moveEnvironmentTab(id, toIndex - requestCount);
       } else {
         moveTab(id, toIndex);
       }
     },
-    [moveSshTab, moveTab],
+    [moveSshTab, moveEnvironmentTab, moveTab],
   );
 
   const closeTabs = useCallback(
@@ -447,7 +470,12 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
       const state = useWorkbenchStore.getState();
       const wanted = [...ids];
       const sshIds = wanted.filter((id) => state.openSshSessionIds.includes(id));
-      const requestIds = wanted.filter((id) => !state.openSshSessionIds.includes(id));
+      const environmentIds = wanted.filter((id) => state.openEnvironmentTabIds.includes(id));
+      const requestIds = wanted.filter(
+        (id) => !state.openSshSessionIds.includes(id) && !state.openEnvironmentTabIds.includes(id),
+      );
+      // Environment edits are committed as they are made, so their tabs close without a prompt.
+      if (environmentIds.length) state.closeEnvironmentTabs(environmentIds);
       // A closed WebSocket tab must not leave its socket open, nor its message log behind for
       // the next time the same request is opened.
       for (const id of requestIds) {
@@ -501,9 +529,10 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   const tabCount = tabs.length;
   const httpTabActive = activeKind === 'request';
   const commands = useMemo<CommandMap>(() => {
-    const active = () =>
-      useWorkbenchStore.getState().activeSshSessionId ??
-      useWorkbenchStore.getState().activeRequestId;
+    const active = () => {
+      const state = useWorkbenchStore.getState();
+      return state.activeSshSessionId ?? state.activeEnvironmentTabId ?? state.activeRequestId;
+    };
     const map: CommandMap = {
       'request.new': { label: 'New Request', shortcut: [{ key: 't', mod: true }], run: newRequest },
       'websocket.new': {
@@ -613,9 +642,11 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
         shortcut: [{ key: String(position), code: `Digit${position}`, mod: true }],
         run: () => {
           const state = useWorkbenchStore.getState();
-          const target = [...state.workspace.openRequestIds, ...state.openSshSessionIds][
-            position - 1
-          ];
+          const target = [
+            ...state.workspace.openRequestIds,
+            ...state.openEnvironmentTabIds,
+            ...state.openSshSessionIds,
+          ][position - 1];
           if (target) activateTab(target);
         },
       };
@@ -837,7 +868,19 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
 
                     {activeSshId &&
                     sshTabs.some((tab) => tab.id === activeSshId) ? null : activeKind ===
-                        'websocket' && activeId ? (
+                        'environment' && activeEnvironmentTabId ? (
+                      <div
+                        role="tabpanel"
+                        id={REQUEST_PANEL_ID}
+                        aria-labelledby={requestTabId(activeEnvironmentTabId)}
+                        className={classes.workspace}
+                      >
+                        <EnvironmentEditor
+                          key={activeEnvironmentTabId}
+                          environmentId={activeEnvironmentTabId}
+                        />
+                      </div>
+                    ) : activeKind === 'websocket' && activeId ? (
                       <div
                         role="tabpanel"
                         id={REQUEST_PANEL_ID}

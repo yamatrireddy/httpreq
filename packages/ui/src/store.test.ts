@@ -149,4 +149,53 @@ describe('workbench store', () => {
     state().setActiveEnvironment(null);
     expect(state().setEnvironmentVariable('accessToken', 'x', true)).toBe(false);
   });
+
+  describe('environment tabs', () => {
+    it('opens beside the request tabs and hands the active tab back and forth', () => {
+      const [request] = openIds();
+      const staging = state().createEnvironment();
+      state().openEnvironmentTab(staging);
+      expect(state().openEnvironmentTabIds).toEqual([staging]);
+      expect(state().activeEnvironmentTabId).toBe(staging);
+      expect(state().activeRequestId).toBeNull();
+
+      state().setActiveRequest(request!);
+      expect(state().activeEnvironmentTabId).toBeNull();
+      expect(state().openEnvironmentTabIds).toEqual([staging]);
+
+      state().setActiveEnvironmentTab(staging);
+      expect(state().activeRequestId).toBeNull();
+    });
+
+    it('closes to a neighbouring environment tab, then back to a request', () => {
+      const [request] = openIds();
+      const one = state().createEnvironment();
+      const two = state().createEnvironment();
+      state().openEnvironmentTab(one);
+      state().openEnvironmentTab(two);
+
+      state().closeEnvironmentTabs([two]);
+      expect(state().activeEnvironmentTabId).toBe(one);
+      state().closeEnvironmentTabs([one]);
+      expect(state().activeEnvironmentTabId).toBeNull();
+      expect(state().activeRequestId).toBe(request);
+    });
+
+    it('closes the tab of a deleted environment', () => {
+      const staging = state().createEnvironment();
+      state().openEnvironmentTab(staging);
+      state().deleteEnvironment(staging);
+      expect(state().openEnvironmentTabIds).toEqual([]);
+      expect(state().activeEnvironmentTabId).toBeNull();
+    });
+
+    it('moves to an environment tab when the last request tab closes', () => {
+      const [request] = openIds();
+      const staging = state().createEnvironment();
+      state().openEnvironmentTab(staging);
+      state().setActiveRequest(request!);
+      state().closeRequests([request!]);
+      expect(state().activeEnvironmentTabId).toBe(staging);
+    });
+  });
 });

@@ -3,48 +3,65 @@ import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { createWorkspace } from '@httpreq/workspace';
 import { useWorkbenchStore } from '../store';
+import { EnvironmentEditor } from '../environment/EnvironmentEditor';
 import { EnvironmentsPanel } from './EnvironmentsPanel';
 
 const state = () => useWorkbenchStore.getState();
+
+/** The sidebar list, and the editor of whichever environment tab is active (as the shell does). */
+function Harness() {
+  const activeTab = useWorkbenchStore((current) => current.activeEnvironmentTabId);
+  return (
+    <>
+      <EnvironmentsPanel />
+      {activeTab && <EnvironmentEditor key={activeTab} environmentId={activeTab} />}
+    </>
+  );
+}
 
 describe('editing environments', () => {
   beforeEach(() => {
     act(() => state().load(createWorkspace('Alpha'), {}, []));
     render(
       <MantineProvider>
-        <EnvironmentsPanel />
+        <Harness />
       </MantineProvider>,
     );
   });
 
-  it('edits a new environment inline, with no dialog, starting at its name', () => {
+  it('opens a new environment in its own tab, with no dialog, starting at its name', () => {
     fireEvent.click(screen.getAllByRole('button', { name: 'New environment' })[0]!);
 
+    const [environment] = state().workspace.environments;
+    expect(state().openEnvironmentTabIds).toEqual([environment!.id]);
+    expect(state().activeEnvironmentTabId).toBe(environment!.id);
     expect(screen.queryByRole('dialog')).not.toBeInTheDocument();
-    const name = screen.getByLabelText('Name');
+
+    const name = screen.getByLabelText('Environment name');
     expect(name).toHaveFocus();
     fireEvent.change(name, { target: { value: 'Staging' } });
     fireEvent.change(screen.getByPlaceholderText('Add variable'), {
       target: { value: 'base_url' },
     });
 
-    const [environment] = state().workspace.environments;
-    expect(environment!.name).toBe('Staging');
-    expect(environment!.variables.map((variable) => variable.key)).toEqual(['base_url']);
+    const saved = state().workspace.environments[0]!;
+    expect(saved.name).toBe('Staging');
+    expect(saved.variables.map((variable) => variable.key)).toEqual(['base_url']);
   });
 
-  it('opens and closes an environment’s editor from its row', () => {
+  it('keeps one tab per environment, so several can be open at once', () => {
     act(() => {
-      state().createEnvironment();
+      state().updateEnvironment(state().createEnvironment(), { name: 'Development' });
+      state().updateEnvironment(state().createEnvironment(), { name: 'Production' });
     });
-    const row = screen.getByRole('button', { name: /^New Environment\s*\d/ });
-    expect(row).toHaveAttribute('aria-expanded', 'false');
+    const [development, production] = state().workspace.environments;
 
-    fireEvent.click(row);
-    expect(row).toHaveAttribute('aria-expanded', 'true');
-    expect(screen.getByRole('group', { name: 'Edit New Environment' })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('button', { name: /^Development\s*\d/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Production\s*\d/ }));
+    fireEvent.click(screen.getByRole('button', { name: /^Development\s*\d/ }));
 
-    fireEvent.click(screen.getByRole('button', { name: 'Done' }));
-    expect(screen.queryByRole('group', { name: /^Edit / })).not.toBeInTheDocument();
+    expect(state().openEnvironmentTabIds).toEqual([development!.id, production!.id]);
+    expect(state().activeEnvironmentTabId).toBe(development!.id);
+    expect(screen.getByLabelText('Environment name')).toHaveValue('Development');
   });
 });
