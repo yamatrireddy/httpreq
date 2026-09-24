@@ -28,3 +28,21 @@ if (typeof document !== 'undefined' && 'fonts' in document) {
     .then(() => monaco.editor.remeasureFonts())
     .catch(() => undefined);
 }
+
+/**
+ * Creates one editor off screen and disposes it. The first `editor.create` builds Monaco's
+ * services, themes and font measurements, which is the slowest part of showing any editor.
+ */
+export const warmUp = () => {
+  if (typeof document === 'undefined') return;
+  const host = document.createElement('div');
+  host.style.cssText =
+    'position:fixed;left:-10000px;top:0;width:200px;height:100px;visibility:hidden';
+  document.body.append(host);
+  try {
+    const instance = monaco.editor.create(host, { value: '{}', language: 'json' });
+    instance.dispose();
+  } finally {
+    host.remove();
+  }
+};

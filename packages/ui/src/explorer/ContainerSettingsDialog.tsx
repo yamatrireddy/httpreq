@@ -1,7 +1,8 @@
-import { Button, Group, Modal, Stack, Textarea, TextInput } from '@mantine/core';
+import { Button, Stack, Textarea, TextInput } from '@mantine/core';
 import { useEffect, useState } from 'react';
 import { resolveInheritedAuth } from '@httpreq/api-client';
 import { findNode } from '@httpreq/workspace';
+import { AppModal } from '../AppModal';
 import { AuthorizationPanel } from '../auth/AuthorizationPanel';
 import { useWorkbenchStore } from '../store';
 
@@ -30,16 +31,26 @@ export function ContainerSettingsDialog({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [nodeId]);
 
-  if (!node) return <Modal opened={false} onClose={onClose} />;
+  if (!node) return <AppModal opened={false} onClose={onClose} title={null} />;
   const { kind } = node;
   const inherited = resolveInheritedAuth(workspace, kind === 'folder' ? node.node.parentId : null);
 
   return (
-    <Modal
+    <AppModal
       opened
       onClose={onClose}
       title={kind === 'collection' ? 'Collection settings' : 'Folder settings'}
       size="lg"
+      footer={
+        <Button
+          onClick={() => {
+            renameNode(node.node.id, name);
+            onClose();
+          }}
+        >
+          Done
+        </Button>
+      }
     >
       <Stack gap="md">
         <TextInput
@@ -70,17 +81,7 @@ export function ContainerSettingsDialog({
             revealNode(id);
           }}
         />
-        <Group justify="flex-end">
-          <Button
-            onClick={() => {
-              renameNode(node.node.id, name);
-              onClose();
-            }}
-          >
-            Done
-          </Button>
-        </Group>
       </Stack>
-    </Modal>
+    </AppModal>
   );
 }

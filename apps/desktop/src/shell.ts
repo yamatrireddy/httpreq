@@ -1,24 +1,8 @@
 import { DOCUMENTATION_URL } from '@httpreq/shared';
 
-/** Height of the custom title bar; the native window-controls overlay must match it. */
-export const TITLE_BAR_HEIGHT = 36;
-
 export const MIN_ZOOM_LEVEL = -3;
 export const MAX_ZOOM_LEVEL = 5;
 export const ZOOM_STEP = 0.5;
-
-const HEX_COLOR = /^#[0-9a-f]{6}$/i;
-
-export const isHexColor = (value: unknown): value is string =>
-  typeof value === 'string' && HEX_COLOR.test(value);
-
-export const isTitleBarTheme = (
-  value: unknown,
-): value is { color: string; symbolColor: string } => {
-  if (!value || typeof value !== 'object') return false;
-  const candidate = value as Record<string, unknown>;
-  return isHexColor(candidate.color) && isHexColor(candidate.symbolColor);
-};
 
 /** Only the project's own documentation may be opened in the system browser. */
 export const isAllowedExternalUrl = (value: unknown): value is string => {

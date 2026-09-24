@@ -206,6 +206,14 @@ export function usePersistence(
     [historyRepository],
   );
 
+  const removeHistory = useCallback(
+    (entryIds: string[]) =>
+      historyRepository
+        .remove(useWorkbenchStore.getState().workspace.id, entryIds)
+        .then((entries) => useWorkbenchStore.getState().setHistory(entries)),
+    [historyRepository],
+  );
+
   const clearHistory = useCallback(
     () =>
       void historyRepository
@@ -335,5 +343,5 @@ export function usePersistence(
     [create, duplicate, rename, remove, switchTo],
   );
 
-  return { loaded, saveRequest, recordHistory, clearHistory, workspaceActions };
+  return { loaded, saveRequest, recordHistory, clearHistory, removeHistory, workspaceActions };
 }

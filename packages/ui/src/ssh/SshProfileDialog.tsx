@@ -2,7 +2,6 @@ import {
   Alert,
   Button,
   Group,
-  Modal,
   NumberInput,
   PasswordInput,
   Select,
@@ -20,6 +19,7 @@ import {
   type SshErrorInfo,
   type SshProfile,
 } from '@httpreq/shared';
+import { AppModal } from '../AppModal';
 import { VariableInput } from '../editor/VariableInput';
 import { useWorkbenchStore } from '../store';
 import { yieldToHostKeyPrompt } from './hostKeyPrompt';
@@ -130,7 +130,7 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
   const needsKey = draft.authType !== 'password';
 
   return (
-    <Modal
+    <AppModal
       opened
       onClose={onClose}
       title="SSH connection"
@@ -138,6 +138,25 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
       centered
       // "Test connection" can raise the host-key question, which has to be answered first.
       {...yieldToHostKeyPrompt(!!ssh.pendingHostKey)}
+      footerStart={
+        <Button
+          variant="default"
+          leftSection={<IconPlugConnected size={15} />}
+          loading={testing}
+          disabled={!ssh.available}
+          onClick={() => void onTest()}
+        >
+          Test connection
+        </Button>
+      }
+      footer={
+        <>
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={() => void onSave()}>Save</Button>
+        </>
+      }
     >
       <Stack gap="sm">
         <TextInput
@@ -307,25 +326,7 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
             )}
           </Alert>
         )}
-
-        <Group justify="space-between" mt="xs">
-          <Button
-            variant="default"
-            leftSection={<IconPlugConnected size={15} />}
-            loading={testing}
-            disabled={!ssh.available}
-            onClick={() => void onTest()}
-          >
-            Test connection
-          </Button>
-          <Group gap="xs">
-            <Button variant="subtle" color="gray" onClick={onClose}>
-              Cancel
-            </Button>
-            <Button onClick={() => void onSave()}>Save</Button>
-          </Group>
-        </Group>
       </Stack>
-    </Modal>
+    </AppModal>
   );
 }

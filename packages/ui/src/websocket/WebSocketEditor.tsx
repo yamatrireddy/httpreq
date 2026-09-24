@@ -371,14 +371,14 @@ export function WebSocketEditor({ requestId }: Props) {
                 }}
               />
             ) : (
-              <div style={{ height: 160 }}>
-                <CodeEditor
-                  value={request.draftMessage}
-                  onChange={(value) => patch({ draftMessage: value })}
-                  language={LANGUAGE[request.draftPayloadType]}
-                  ariaLabel="Message to send"
-                />
-              </div>
+              // One editor for JSON and XML: switching format changes its language, not the editor.
+              <CodeEditor
+                className={classes.composerEditor}
+                value={request.draftMessage}
+                onChange={(value) => patch({ draftMessage: value })}
+                language={LANGUAGE[request.draftPayloadType]}
+                ariaLabel="Message to send"
+              />
             )}
           </div>
         </div>

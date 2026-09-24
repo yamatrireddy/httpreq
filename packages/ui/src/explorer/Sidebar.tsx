@@ -38,12 +38,13 @@ const KEYBOARD_STEP = 16;
 
 interface Props {
   onClearHistory: () => void;
+  onRemoveHistory: (entryIds: string[]) => Promise<void>;
   /** Closes the navigation drawer on small screens after something was opened. */
   onNavigate?: () => void;
 }
 
 /** Activity rail + the selected view, with a resize handle on the right edge. */
-export function Sidebar({ onClearHistory, onNavigate }: Props) {
+export function Sidebar({ onClearHistory, onRemoveHistory, onNavigate }: Props) {
   const view = useWorkbenchStore((state) => state.sidebarView);
   const setView = useWorkbenchStore((state) => state.setSidebarView);
   const capabilities = useCapabilities();
@@ -134,7 +135,9 @@ export function Sidebar({ onClearHistory, onNavigate }: Props) {
           <CollectionsExplorer onOpenSettings={setSettingsId} onOpened={onNavigate} />
         )}
         {view === 'environments' && <EnvironmentsPanel onOpened={onNavigate} />}
-        {view === 'history' && <HistoryPanel onClear={onClearHistory} onOpened={onNavigate} />}
+        {view === 'history' && (
+          <HistoryPanel onClear={onClearHistory} onRemove={onRemoveHistory} onOpened={onNavigate} />
+        )}
         {view === 'ssh' && desktopViews && <SshPanel onOpened={onNavigate} />}
         {view === 'tunnels' && desktopViews && <TunnelsPanel />}
       </div>

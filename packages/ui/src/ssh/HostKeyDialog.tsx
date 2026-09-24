@@ -1,5 +1,6 @@
-import { Alert, Button, Code, Group, Modal, Stack, Text } from '@mantine/core';
+import { Alert, Button, Code, Stack, Text } from '@mantine/core';
 import { IconAlertTriangle, IconShieldQuestion } from '@tabler/icons-react';
+import { AppModal } from '../AppModal';
 import { Z_LAYERS } from '../zLayers';
 import { useSsh } from './useSsh';
 import classes from './Ssh.module.css';
@@ -22,7 +23,7 @@ export function HostKeyDialog() {
   const changed = !!prompt?.storedFingerprint;
 
   return (
-    <Modal
+    <AppModal
       opened={!!pending}
       onClose={() => ssh.answerHostKey('reject')}
       title={changed ? 'Host identification has changed' : 'Unknown host'}
@@ -34,6 +35,19 @@ export function HostKeyDialog() {
       returnFocus
       centered
       size="lg"
+      footer={
+        prompt && (
+          <>
+            {/* The safe answer holds the initial focus, so Enter can never trust a host. */}
+            <Button variant="default" data-autofocus onClick={() => ssh.answerHostKey('reject')}>
+              Cancel connection
+            </Button>
+            <Button color={changed ? 'red' : undefined} onClick={() => ssh.answerHostKey('trust')}>
+              {changed ? 'Accept the new key' : 'Trust this host'}
+            </Button>
+          </>
+        )
+      }
     >
       {prompt && (
         <Stack gap="md">
@@ -80,18 +94,8 @@ export function HostKeyDialog() {
             </Text>
             <Text className={classes.fingerprint}>{prompt.fingerprint}</Text>
           </Stack>
-
-          <Group justify="flex-end" gap="xs">
-            {/* The safe answer holds the initial focus, so Enter can never trust a host. */}
-            <Button variant="default" data-autofocus onClick={() => ssh.answerHostKey('reject')}>
-              Cancel connection
-            </Button>
-            <Button color={changed ? 'red' : undefined} onClick={() => ssh.answerHostKey('trust')}>
-              {changed ? 'Accept the new key' : 'Trust this host'}
-            </Button>
-          </Group>
         </Stack>
       )}
-    </Modal>
+    </AppModal>
   );
 }

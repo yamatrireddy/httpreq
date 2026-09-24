@@ -91,9 +91,19 @@
 }
 
 .editor {
+  position: relative;
   flex: 1;
   min-height: 0;
   border: 0;
+}
+
+/* Over the raw text while a large body is formatted, so the panel is never blank. */
+.formatting {
+  position: absolute;
+  inset: 0;
+  flex-direction: column;
+  gap: 8px;
+  background: color-mix(in srgb, var(--mantine-color-body) 70%, transparent);
 }
 
 .headersPanel {

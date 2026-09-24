@@ -1,7 +1,8 @@
-import { Box, Center, Loader, useComputedColorScheme } from '@mantine/core';
+import { Box, useComputedColorScheme } from '@mantine/core';
 import type { editor } from 'monaco-editor';
-import { lazy, Suspense } from 'react';
-import { MONO_FONT_FAMILY } from '../theme';
+import { lazy, Suspense, useCallback, useMemo, useRef } from 'react';
+import { applyIndentation, BASE_EDITOR_OPTIONS } from './editorOptions';
+import { EditorLoading } from './EditorLoading';
 
 const Editor = lazy(() => import('../LocalEditor'));
 
@@ -16,7 +17,13 @@ interface Props {
   onEditor?: (instance: editor.IStandaloneCodeEditor) => void;
 }
 
-/** Monaco editor with the app's font, theme and compact defaults (line numbers, search, folding). */
+/**
+ * Monaco editor with the app's font, theme, four-space indentation and compact defaults (line
+ * numbers, search, folding). It fills its frame, so give the frame (via `className`) a size.
+ *
+ * Changing `language` (JSON to XML, say) keeps the same editor instance and only switches the
+ * model's language; the options object is stable, so a re-render never reconfigures Monaco.
+ */
 export function CodeEditor({
   value,
   onChange,
@@ -27,34 +34,40 @@ export function CodeEditor({
   onEditor,
 }: Props) {
   const colorScheme = useComputedColorScheme('dark');
+  const options = useMemo<editor.IStandaloneEditorConstructionOptions>(
+    () => ({
+      ...BASE_EDITOR_OPTIONS,
+      ariaLabel,
+      readOnly,
+      padding: { top: 10 },
+      formatOnPaste: language === 'json',
+    }),
+    [ariaLabel, readOnly, language],
+  );
+
+  // Stable handlers: a new function each render would make the wrapper re-subscribe to Monaco.
+  const latest = useRef({ onChange, onEditor });
+  latest.current = { onChange, onEditor };
+  const handleChange = useCallback((content: string | undefined) => {
+    latest.current.onChange?.(content ?? '');
+  }, []);
+  const handleMount = useCallback((instance: editor.IStandaloneCodeEditor) => {
+    applyIndentation(instance.getModel());
+    instance.onDidChangeModel(() => applyIndentation(instance.getModel()));
+    latest.current.onEditor?.(instance);
+  }, []);
+
   return (
     <Box className={`editor-frame ${className ?? ''}`}>
-      <Suspense
-        fallback={
-          <Center h="100%">
-            <Loader size="sm" />
-          </Center>
-        }
-      >
+      <Suspense fallback={<EditorLoading />}>
         <Editor
           language={language}
           theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
           value={value}
-          onChange={(content) => onChange?.(content ?? '')}
-          onMount={(instance) => onEditor?.(instance)}
-          options={{
-            ariaLabel,
-            readOnly,
-            minimap: { enabled: false },
-            fontSize: 13,
-            fontFamily: MONO_FONT_FAMILY,
-            scrollBeyondLastLine: false,
-            padding: { top: 10 },
-            automaticLayout: true,
-            tabSize: 2,
-            formatOnPaste: language === 'json',
-            fixedOverflowWidgets: true,
-          }}
+          onChange={handleChange}
+          onMount={handleMount}
+          loading={<EditorLoading />}
+          options={options}
         />
       </Suspense>
     </Box>

@@ -134,6 +134,10 @@
   background: var(--mantine-color-default-hover);
 }
 
+.item[data-checked] {
+  background: var(--mantine-primary-color-light);
+}
+
 .itemText {
   flex: 1;
   min-width: 0;
@@ -172,4 +176,8 @@
   font-size: var(--mantine-font-size-xs);
   word-break: break-all;
   user-select: all;
+}
+
+.itemActions[hidden] {
+  display: none;
 }

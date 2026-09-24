@@ -153,6 +153,17 @@
   gap: 8px;
 }
 
+/*
+ * The composer's code editor. Monaco sizes itself to its frame, so the frame needs a definite
+ * height and must be allowed to shrink horizontally; an auto-sized frame is what squeezed it.
+ */
+.composerEditor {
+  flex: none;
+  width: 100%;
+  min-width: 0;
+  height: 180px;
+}
+
 .composerRow {
   display: flex;
   align-items: center;

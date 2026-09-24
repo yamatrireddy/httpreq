@@ -28,10 +28,8 @@ import { registerServices } from './services';
 import {
   isAllowedExternalUrl,
   isAuthorizationUrl,
-  isTitleBarTheme,
   isTrustedRendererUrl,
   nextZoomLevel,
-  TITLE_BAR_HEIGHT,
 } from './shell';
 
 const currentDir = dirname(fileURLToPath(import.meta.url));
@@ -63,11 +61,6 @@ const contentSecurityPolicy = [
 
 /** Matches the renderer's body colour, so the window can be shown before the page paints. */
 const windowBackground = () => (nativeTheme.shouldUseDarkColors ? '#242424' : '#ffffff');
-
-const titleBarColors = () =>
-  nativeTheme.shouldUseDarkColors
-    ? { color: '#141414', symbolColor: '#c9c9c9' }
-    : { color: '#f1f3f5', symbolColor: '#343a40' };
 
 // Only the top-level document of the app may use shell IPC; subframes have a parent frame.
 const isTrustedSender = (event: IpcMainEvent | IpcMainInvokeEvent) =>
@@ -168,6 +161,12 @@ const performAction = (window: BrowserWindow, action: WindowAction) => {
       return contents.setZoomLevel(nextZoomLevel(contents.getZoomLevel(), 'out'));
     case 'zoom-reset':
       return contents.setZoomLevel(0);
+    case 'minimize':
+      return window.minimize();
+    case 'toggle-maximize':
+      return window.isMaximized() ? window.unmaximize() : window.maximize();
+    case 'close':
+      return window.close();
     case 'toggle-fullscreen':
       return window.setFullScreen(!window.isFullScreen());
     case 'toggle-devtools':
@@ -180,12 +179,6 @@ const performAction = (window: BrowserWindow, action: WindowAction) => {
 ipcMain.on('window:action', (event, action: unknown) => {
   const window = windowFor(event);
   if (window && isTrustedSender(event) && isWindowAction(action)) performAction(window, action);
-});
-
-ipcMain.on('window:title-bar-theme', (event, theme: unknown) => {
-  const window = windowFor(event);
-  if (!window || isMac || !isTrustedSender(event) || !isTitleBarTheme(theme)) return;
-  window.setTitleBarOverlay({ ...theme, height: TITLE_BAR_HEIGHT });
 });
 
 ipcMain.on('shell:open-external', (event, url: unknown) => {
@@ -230,11 +223,10 @@ const createWindow = async () => {
     // (GPU, renderer) can take over a second to start, and a window that appears at once in the
     // app's colours feels far faster than one that appears only when the page has painted.
     show: true,
-    // The React title bar hosts the menu; the OS keeps drawing the real window controls.
+    // The React title bar hosts the menu and, on Windows and Linux, its own minimise, maximise
+    // and close buttons; macOS keeps the native traffic lights.
     titleBarStyle: 'hidden',
-    ...(isMac
-      ? { trafficLightPosition: { x: 14, y: 11 } }
-      : { titleBarOverlay: { ...titleBarColors(), height: TITLE_BAR_HEIGHT } }),
+    ...(isMac ? { trafficLightPosition: { x: 14, y: 11 } } : {}),
     webPreferences: {
       preload: join(currentDir, 'preload.cjs'),
       contextIsolation: true,

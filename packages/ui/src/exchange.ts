@@ -2,6 +2,7 @@ import { deserializeAuth } from '@httpreq/api-client';
 import { createId, WORKSPACE_VERSION, type HttpRequest, type Workspace } from '@httpreq/shared';
 import { sanitizeWorkspace } from '@httpreq/storage';
 import { collectSubtree, migrateWorkspace } from '@httpreq/workspace';
+import { stringifyPretty } from './indent';
 
 /**
  * Local, file-based sharing. Exports are sanitized exactly like storage (no literal secrets);
@@ -52,7 +53,7 @@ export const exportCollection = (workspace: Workspace, collectionId: string) => 
 };
 
 export const downloadJson = (fileName: string, data: unknown) => {
-  const blob = new Blob([JSON.stringify(data, null, 2)], { type: 'application/json' });
+  const blob = new Blob([stringifyPretty(data)], { type: 'application/json' });
   const url = URL.createObjectURL(blob);
   const anchor = document.createElement('a');
   anchor.href = url;
@@ -87,21 +88,19 @@ const reassignIds = (imported: Workspace): Workspace => {
   };
 };
 
-export interface ImportResult {
-  workspace: Workspace;
-  /** Root collection or request id that was added. */
-  rootId: string;
-  kind: 'collection' | 'request';
-}
+/** Whether parsed JSON is an HttpReq request or collection export. */
+export const isHttpReqExport = (data: unknown) =>
+  !!data &&
+  typeof data === 'object' &&
+  ((data as { format?: unknown }).format === FORMAT_COLLECTION ||
+    (data as { format?: unknown }).format === FORMAT_REQUEST);
 
-/** Parses an exported file and merges it into `workspace`. Throws on unsupported content. */
-export const importFile = (workspace: Workspace, text: string): ImportResult => {
-  let data: Record<string, unknown>;
-  try {
-    data = JSON.parse(text) as Record<string, unknown>;
-  } catch {
-    throw new Error('The file is not valid JSON.');
-  }
+/**
+ * Validates an HttpReq export and returns its contents with fresh ids, as a workspace fragment
+ * (its collections, folders and requests only). Throws on anything that is not a valid export.
+ */
+export const parseHttpReqExport = (data: unknown): Workspace => {
+  const record = (data ?? {}) as Record<string, unknown>;
   const base = {
     version: WORKSPACE_VERSION,
     id: 'import',
@@ -112,19 +111,19 @@ export const importFile = (workspace: Workspace, text: string): ImportResult => 
     updatedAt: new Date().toISOString(),
   };
   let raw: Record<string, unknown>;
-  if (data?.format === FORMAT_COLLECTION) {
+  if (record.format === FORMAT_COLLECTION) {
     raw = {
       ...base,
-      collections: [data.collection],
-      folders: data.folders,
-      requests: data.requests,
+      collections: [record.collection],
+      folders: record.folders,
+      requests: record.requests,
     };
-  } else if (data?.format === FORMAT_REQUEST) {
+  } else if (record.format === FORMAT_REQUEST) {
     raw = {
       ...base,
       collections: [],
       folders: [],
-      requests: [{ ...(data.request as object), parentId: null }],
+      requests: [{ ...(record.request as object), parentId: null }],
     };
   } else {
     throw new Error('This is not an HttpReq request or collection export.');
@@ -133,17 +132,5 @@ export const importFile = (workspace: Workspace, text: string): ImportResult => 
   if (!parsed || (parsed.collections.length === 0 && parsed.requests.length === 0)) {
     throw new Error('The file does not contain a request or collection.');
   }
-  const imported = reassignIds(parsed);
-  const kind = imported.collections.length ? 'collection' : 'request';
-  return {
-    kind,
-    rootId: kind === 'collection' ? imported.collections[0]!.id : imported.requests[0]!.id,
-    workspace: {
-      ...workspace,
-      collections: [...workspace.collections, ...imported.collections],
-      folders: [...workspace.folders, ...imported.folders],
-      requests: [...workspace.requests, ...imported.requests],
-      updatedAt: new Date().toISOString(),
-    },
-  };
+  return reassignIds(parsed);
 };

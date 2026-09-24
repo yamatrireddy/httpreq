@@ -1,4 +1,4 @@
-import { Button, Menu, Modal, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
+import { Button, Menu, Stack, Text, TextInput, UnstyledButton } from '@mantine/core';
 import {
   IconCheck,
   IconChevronDown,
@@ -11,6 +11,7 @@ import {
 import { useState } from 'react';
 import { notifications } from '@mantine/notifications';
 import { describeActiveResources, totalActiveResources } from '@httpreq/workspace';
+import { AppModal } from './AppModal';
 import { confirmAction } from './confirm';
 import { useShallow } from 'zustand/react/shallow';
 import { activeConnectionCounts, useConnectionsStore } from './connections';
@@ -200,7 +201,23 @@ export function WorkspaceSwitcher({ actions, releaseConnections }: Props) {
         </Menu.Dropdown>
       </Menu>
 
-      <Modal opened={!!renaming} onClose={cancelRename} title="Rename workspace" centered size="sm">
+      <AppModal
+        opened={!!renaming}
+        onClose={cancelRename}
+        title="Rename workspace"
+        centered
+        size="sm"
+        footer={
+          <>
+            <Button variant="default" onClick={cancelRename}>
+              Cancel
+            </Button>
+            <Button disabled={blankName} onClick={() => void commitRename()}>
+              Rename
+            </Button>
+          </>
+        }
+      >
         <Stack gap="sm">
           <TextInput
             label="Name"
@@ -233,11 +250,8 @@ export function WorkspaceSwitcher({ actions, releaseConnections }: Props) {
             Requests, environments and connection profiles keep their identifiers, so nothing breaks
             when a workspace is renamed.
           </Text>
-          <Button disabled={blankName} onClick={() => void commitRename()}>
-            Rename
-          </Button>
         </Stack>
-      </Modal>
+      </AppModal>
     </>
   );
 }

@@ -8,7 +8,7 @@ import {
   IconServer,
   IconTrash,
 } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import type { SshProfile } from '@httpreq/shared';
 import { confirmAction } from '../confirm';
 import { useConnectionsStore } from '../connections';
@@ -17,6 +17,13 @@ import { SshProfileDialog } from './SshProfileDialog';
 import { useSsh } from './useSsh';
 import classes from './Ssh.module.css';
 import { PanelHeader } from '../explorer/PanelHeader';
+import {
+  BulkDeleteButton,
+  RowCheckbox,
+  SelectionBar,
+  SelectModeButton,
+} from '../explorer/Selection';
+import { useSelection } from '../explorer/useSelection';
 
 /** The SSH sidebar view: the workspace's connection profiles and their live sessions. */
 export function SshPanel({ onOpened }: { onOpened?: () => void }) {
@@ -27,6 +34,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
   const sessions = useConnectionsStore((state) => state.sessions);
   const ssh = useSsh();
   const [editing, setEditing] = useState<string | null>(null);
+  const selection = useSelection(useMemo(() => profiles.map((profile) => profile.id), [profiles]));
 
   const liveCount = (profileId: string) =>
     Object.values(sessions).filter(
@@ -61,9 +69,36 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
     deleteProfile(profile.id);
   };
 
+  const removeSelected = async () => {
+    const selected = profiles.filter((profile) => selection.isSelected(profile.id));
+    if (selected.length === 0) return;
+    const workspace = useWorkbenchStore.getState().workspace;
+    const dependents = selected.flatMap((profile) => tunnelsUsingSshProfile(workspace, profile.id));
+    const count = selected.length;
+    const result = await confirmAction({
+      title: count === 1 ? 'Delete SSH profile' : `Delete ${count} SSH profiles`,
+      message:
+        `Delete ${count === 1 ? `“${selected[0]!.name}”` : `${count} SSH profiles`}? ` +
+        `${count === 1 ? 'Its stored credential is' : 'Their stored credentials are'} deleted too.` +
+        (dependents.length
+          ? ` ${dependents.length} tunnel${dependents.length === 1 ? ' uses' : 's use'} ${count === 1 ? 'it' : 'them'} and will stop working until pointed at another connection.`
+          : ' This cannot be undone.'),
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (result !== 'confirm') return;
+    for (const profile of selected) {
+      // The vault entry goes first: a profile removed without it would orphan the secret.
+      await ssh.deleteCredential(profile.credentialId);
+      deleteProfile(profile.id);
+    }
+    selection.stop();
+  };
+
   return (
     <div className={classes.panel}>
       <PanelHeader title="Connections">
+        <SelectModeButton selection={selection} noun="connections" />
         <Tooltip label="New SSH connection">
           <ActionIcon
             variant="subtle"
@@ -76,6 +111,13 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
           </ActionIcon>
         </Tooltip>
       </PanelHeader>
+      <SelectionBar selection={selection} label="Connection selection">
+        <BulkDeleteButton
+          selection={selection}
+          noun="connections"
+          onDelete={() => void removeSelected()}
+        />
+      </SelectionBar>
 
       <div className={classes.list}>
         {profiles.length === 0 ? (
@@ -95,8 +137,21 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
         ) : (
           profiles.map((profile) => {
             const live = liveCount(profile.id);
+            const checked = selection.isSelected(profile.id);
             return (
-              <div key={profile.id} className={classes.item}>
+              <div
+                key={profile.id}
+                className={classes.item}
+                data-checked={checked || undefined}
+                data-selectable={selection.selecting || undefined}
+              >
+                {selection.selecting && (
+                  <RowCheckbox
+                    checked={checked}
+                    label={profile.name}
+                    onChange={() => selection.toggle(profile.id)}
+                  />
+                )}
                 <IconServer size={15} aria-hidden />
                 <button
                   type="button"
@@ -109,8 +164,11 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                     cursor: 'pointer',
                     padding: 0,
                   }}
-                  onDoubleClick={() => connect(profile)}
-                  onClick={() => setEditing(profile.id)}
+                  onDoubleClick={() => !selection.selecting && connect(profile)}
+                  onClick={() =>
+                    selection.selecting ? selection.toggle(profile.id) : setEditing(profile.id)
+                  }
+                  tabIndex={selection.selecting ? -1 : undefined}
                   title={`${profile.username || 'user'}@${profile.host || 'host'}:${profile.port}`}
                 >
                   <span className={classes.itemName}>
@@ -121,7 +179,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                     {profile.username || 'user'}@{profile.host || 'host'}:{profile.port}
                   </span>
                 </button>
-                <span className={classes.itemActions}>
+                <span className={classes.itemActions} hidden={selection.selecting}>
                   <Tooltip label="Connect">
                     <ActionIcon
                       variant="subtle"

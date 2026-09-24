@@ -3,7 +3,6 @@ import {
   Button,
   Group,
   Kbd,
-  Modal,
   SegmentedControl,
   Stack,
   Switch,
@@ -16,6 +15,7 @@ import { IconLayoutColumns, IconLayoutRows } from '@tabler/icons-react';
 import { Fragment, useEffect, useState } from 'react';
 import { DOCUMENTATION_URL, type AppInfo, type DesktopBridge } from '@httpreq/shared';
 import { AppLogo } from './AppLogo';
+import { AppModal } from './AppModal';
 import type { CommandMap } from './commands';
 import { DEFAULT_SPLIT_RATIO, usePreferences, type ResponsePosition } from './preferences';
 import { formatChord, type KeyChord } from './shortcuts';
@@ -30,7 +30,24 @@ export function SettingsDialog({ opened, onClose }: ModalProps) {
   const preferences = usePreferences();
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Settings" size="md">
+    <AppModal
+      opened={opened}
+      onClose={onClose}
+      title="Settings"
+      size="md"
+      footerStart={
+        <Button
+          variant="default"
+          onClick={() => {
+            preferences.setSplitRatio('right', DEFAULT_SPLIT_RATIO.right);
+            preferences.setSplitRatio('bottom', DEFAULT_SPLIT_RATIO.bottom);
+          }}
+        >
+          Reset panel sizes
+        </Button>
+      }
+      footer={<Button onClick={onClose}>Done</Button>}
+    >
       <Stack gap="lg">
         <Stack gap={6}>
           <Text size="sm" fw={600} id="settings-theme">
@@ -88,20 +105,8 @@ export function SettingsDialog({ opened, onClose }: ModalProps) {
           checked={preferences.statusBarVisible}
           onChange={preferences.toggleStatusBar}
         />
-        <Group justify="space-between">
-          <Button
-            variant="default"
-            onClick={() => {
-              preferences.setSplitRatio('right', DEFAULT_SPLIT_RATIO.right);
-              preferences.setSplitRatio('bottom', DEFAULT_SPLIT_RATIO.bottom);
-            }}
-          >
-            Reset panel sizes
-          </Button>
-          <Button onClick={onClose}>Done</Button>
-        </Group>
       </Stack>
-    </Modal>
+    </AppModal>
   );
 }
 
@@ -148,7 +153,13 @@ export function ShortcutsDialog({
   const groups = [{ group: 'Commands', rows: commandRows }, ...staticRows(mac)];
 
   return (
-    <Modal opened={opened} onClose={onClose} title="Keyboard shortcuts" size="lg">
+    <AppModal
+      opened={opened}
+      onClose={onClose}
+      title="Keyboard shortcuts"
+      size="lg"
+      footer={<Button onClick={onClose}>Close</Button>}
+    >
       {web && (
         <Text size="xs" c="dimmed" mb="sm">
           Browsers reserve some combinations (such as {chord({ key: 't', mod: true })},{' '}
@@ -183,7 +194,7 @@ export function ShortcutsDialog({
           ))}
         </Table.Tbody>
       </Table>
-    </Modal>
+    </AppModal>
   );
 }
 
@@ -200,7 +211,14 @@ export function AboutDialog({
   }, [opened, desktop, info]);
 
   return (
-    <Modal opened={opened} onClose={onClose} title="About HttpReq" size="sm" centered>
+    <AppModal
+      opened={opened}
+      onClose={onClose}
+      title="About HttpReq"
+      size="sm"
+      centered
+      footer={<Button onClick={onClose}>Close</Button>}
+    >
       <Stack align="center" gap="xs" ta="center">
         <AppLogo size={56} />
         <Text fw={700} size="lg">
@@ -233,6 +251,6 @@ export function AboutDialog({
           Documentation
         </Anchor>
       </Stack>
-    </Modal>
+    </AppModal>
   );
 }

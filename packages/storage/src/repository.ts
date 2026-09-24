@@ -255,6 +255,13 @@ export class KeyValueHistoryRepository implements HistoryRepository {
     return entries;
   }
 
+  async remove(workspaceId: string, entryIds: string[]): Promise<HistoryEntry[]> {
+    const doomed = new Set(entryIds);
+    const entries = (await this.list(workspaceId)).filter((entry) => !doomed.has(entry.id));
+    await this.store.set(HISTORY_KEY(workspaceId), entries);
+    return entries;
+  }
+
   async clear(workspaceId: string): Promise<void> {
     await this.store.delete(HISTORY_KEY(workspaceId));
   }

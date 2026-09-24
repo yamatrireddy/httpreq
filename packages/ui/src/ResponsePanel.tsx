@@ -1,6 +1,5 @@
 import {
   Badge,
-  Box,
   Center,
   Loader,
   SegmentedControl,
@@ -14,13 +13,13 @@ import { useComputedColorScheme } from '@mantine/core';
 import { IconBraces, IconClock, IconDatabase } from '@tabler/icons-react';
 import { lazy, Suspense, useEffect, useMemo, useState } from 'react';
 import type { HttpResponse } from '@httpreq/shared';
-import { prettyJson, WORKER_FORMAT_THRESHOLD } from './prettyJson';
-import { prettyJsonText } from './prettyJsonText';
+import { EditorLoading } from './editor/EditorLoading';
+import { prettyBody, WORKER_FORMAT_THRESHOLD } from './prettyBody';
+import { prettyText, type PrettyKind, type PrettyResult } from './prettyText';
 import { ScrollableTabsList } from './ScrollableTabsList';
-import { MONO_FONT_FAMILY } from './theme';
 import classes from './ResponsePanel.module.css';
 
-const Editor = lazy(() => import('./LocalEditor'));
+const ResponseViewer = lazy(() => import('./ResponseViewer'));
 
 /**
  * From this size the viewer drops line wrapping and folding. Wrapping makes the editor compute
@@ -39,48 +38,63 @@ const formatBytes = (bytes: number) =>
       : `${(bytes / 1024 / 1024).toFixed(1)} MB`;
 
 /** Formatted bodies, per response, so switching tabs or views never formats one twice. */
-const formatted = new WeakMap<HttpResponse, string>();
+const formatted = new WeakMap<HttpResponse, PrettyResult>();
+
+/** A stable id per response object, naming its documents in the viewer. */
+const responseIds = new WeakMap<HttpResponse, number>();
+let nextResponseId = 0;
+const responseId = (response: HttpResponse) => {
+  let id = responseIds.get(response);
+  if (id === undefined) {
+    id = ++nextResponseId;
+    responseIds.set(response, id);
+  }
+  return id;
+};
 
 type BodyView = 'pretty' | 'raw';
 type ResponseTab = 'body' | 'headers';
 
-/**
- * The text the body viewer shows: raw, or indented JSON. Large bodies are indented in a worker;
- * `null` means that is still in progress.
- */
-function useDisplayedBody(response: HttpResponse | undefined, view: BodyView): string | null {
-  const json = !!response?.contentType.includes('json');
-  const wantsPretty = !!response && json && view === 'pretty';
-  const small = !!response && response.body.length < WORKER_FORMAT_THRESHOLD;
-  const [done, setDone] = useState<{ response: HttpResponse; text: string } | null>(null);
+const DEFAULT_OPTIONS = { wordWrap: 'on', folding: true } as const;
+const LARGE_OPTIONS = { wordWrap: 'off', folding: false } as const;
 
-  // Small bodies are formatted during render: faster than a round trip, and no flash of a loader.
-  const inline = useMemo(
-    () => (wantsPretty && small ? prettyJsonText(response.body) : null),
-    [response, wantsPretty, small],
-  );
+/** The structured format a content type can be pretty-printed as, if any. */
+const prettyKind = (contentType: string): PrettyKind | null =>
+  /json/i.test(contentType) ? 'json' : /xml/i.test(contentType) ? 'xml' : null;
+
+/**
+ * The formatted body for the Pretty view: small bodies are formatted during render (faster than a
+ * round trip, with no loader flash), large ones in a worker. `null` means that is still running.
+ */
+function usePrettyBody(response: HttpResponse | undefined, kind: PrettyKind | null) {
+  const wanted = !!response && kind !== null;
+  const small = !!response && response.body.length < WORKER_FORMAT_THRESHOLD;
+  const [done, setDone] = useState<{ response: HttpResponse; result: PrettyResult } | null>(null);
+
+  const inline = useMemo(() => {
+    if (!response || !kind || !small) return null;
+    const cached = formatted.get(response);
+    if (cached) return cached;
+    const result = prettyText(response.body, kind);
+    formatted.set(response, result);
+    return result;
+  }, [response, small, kind]);
 
   useEffect(() => {
-    if (!response || !wantsPretty || small) return;
-    const cached = formatted.get(response);
-    if (cached !== undefined) {
-      setDone({ response, text: cached });
-      return;
-    }
+    if (!response || !kind || small || formatted.has(response)) return;
     let live = true;
-    void prettyJson(response.body).then((text) => {
-      formatted.set(response, text);
-      if (live) setDone({ response, text });
+    void prettyBody(response.body, kind).then((result) => {
+      formatted.set(response, result);
+      if (live) setDone({ response, result });
     });
     return () => {
       live = false;
     };
-  }, [response, wantsPretty, small]);
+  }, [response, small, kind]);
 
-  if (!response) return '';
-  if (!wantsPretty) return response.body;
-  if (inline !== null) return inline;
-  return done?.response === response ? done.text : (formatted.get(response) ?? null);
+  if (!response || !wanted) return null;
+  if (inline) return inline;
+  return done?.response === response ? done.result : (formatted.get(response) ?? null);
 }
 
 export function ResponsePanel({
@@ -93,7 +107,9 @@ export function ResponsePanel({
   const colorScheme = useComputedColorScheme('dark');
   const [view, setView] = useState<BodyView>('pretty');
   const [tab, setTab] = useState<ResponseTab>('body');
-  const displayedBody = useDisplayedBody(response, view);
+  const kind = response ? prettyKind(response.contentType) : null;
+  // Formatting starts as soon as a response arrives, so the Pretty view is ready when asked for.
+  const pretty = usePrettyBody(response, kind);
 
   if (!response) {
     return (
@@ -111,16 +127,24 @@ export function ResponsePanel({
     );
   }
 
-  const json = response.contentType.includes('json');
-  const size = displayedBody?.length ?? response.body.length;
+  const wantsPretty = kind !== null && view === 'pretty';
+  // While a large body is being formatted, the raw text stays on screen under a loader.
+  const formatting = wantsPretty && pretty === null;
+  const showPretty = wantsPretty && pretty !== null && pretty.ok;
+  const displayed = showPretty ? pretty.text : response.body;
+  const size = displayed.length;
   const large = size >= LARGE_BODY_CHARS;
   const headerCount = Object.keys(response.headers).length;
+  const id = responseId(response);
+  const language =
+    size >= PLAIN_TEXT_CHARS || !kind ? 'plaintext' : kind === 'json' ? 'json' : 'xml';
 
   return (
     <Tabs
       value={tab}
       onChange={(value) => value && setTab(value as ResponseTab)}
-      keepMounted={false}
+      // The body viewer stays mounted on the Headers tab, so coming back does not rebuild it.
+      keepMounted
       className={classes.root}
     >
       {/*
@@ -136,7 +160,7 @@ export function ResponsePanel({
           </Tabs.Tab>
         </ScrollableTabsList>
         <div className={classes.tools}>
-          {json && (
+          {kind && (
             <SegmentedControl
               size="xs"
               value={view}
@@ -176,38 +200,31 @@ export function ResponsePanel({
             {size >= PLAIN_TEXT_CHARS ? ', and so is highlighting' : ''}, to keep scrolling smooth.
           </Text>
         )}
-        <Box className={`editor-frame ${classes.editor}`}>
-          {displayedBody === null ? (
-            <Center h="100%">
+        {wantsPretty && pretty && !pretty.ok && (
+          <Text size="xs" c="dimmed" className={classes.notice} role="status">
+            The body is not valid {kind === 'json' ? 'JSON' : 'XML'}, so it is shown as received.
+          </Text>
+        )}
+        <div className={`editor-frame ${classes.editor}`}>
+          <Suspense fallback={<EditorLoading />}>
+            <ResponseViewer
+              documentKey={`${id}:${showPretty ? 'pretty' : 'raw'}`}
+              group={String(id)}
+              value={displayed}
+              language={language}
+              theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
+              options={large ? LARGE_OPTIONS : DEFAULT_OPTIONS}
+            />
+          </Suspense>
+          {formatting && (
+            <Center className={classes.formatting}>
               <Loader size="sm" aria-label="Formatting the response" />
+              <Text size="xs" c="dimmed">
+                Formatting {formatBytes(response.sizeBytes)}…
+              </Text>
             </Center>
-          ) : (
-            <Suspense
-              fallback={
-                <Center h="100%">
-                  <Loader size="sm" />
-                </Center>
-              }
-            >
-              <Editor
-                language={json && size < PLAIN_TEXT_CHARS ? 'json' : 'text'}
-                theme={colorScheme === 'dark' ? 'vs-dark' : 'light'}
-                value={displayedBody}
-                options={{
-                  readOnly: true,
-                  domReadOnly: true,
-                  minimap: { enabled: false },
-                  fontSize: 13,
-                  fontFamily: MONO_FONT_FAMILY,
-                  scrollBeyondLastLine: false,
-                  wordWrap: large ? 'off' : 'on',
-                  folding: !large,
-                  automaticLayout: true,
-                }}
-              />
-            </Suspense>
           )}
-        </Box>
+        </div>
       </Tabs.Panel>
       <Tabs.Panel value="headers" className={classes.headersPanel}>
         <Table striped highlightOnHover withTableBorder className="hr-mono">

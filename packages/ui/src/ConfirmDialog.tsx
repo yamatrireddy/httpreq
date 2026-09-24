@@ -1,4 +1,5 @@
-import { Button, Group, Modal, Text } from '@mantine/core';
+import { Button, Text } from '@mantine/core';
+import { AppModal } from './AppModal';
 import { settleConfirm, useConfirmStore } from './confirm';
 import { Z_LAYERS } from './zLayers';
 
@@ -11,18 +12,16 @@ import { Z_LAYERS } from './zLayers';
 export function ConfirmDialog() {
   const request = useConfirmStore((state) => state.request);
   return (
-    <Modal
+    <AppModal
       opened={!!request}
       onClose={() => settleConfirm('cancel')}
       title={request?.title}
       size="sm"
       zIndex={Z_LAYERS.confirm}
       centered
-    >
-      {request && (
-        <>
-          <Text size="sm">{request.message}</Text>
-          <Group justify="flex-end" mt="lg" gap="xs">
+      footer={
+        request && (
+          <>
             <Button variant="default" onClick={() => settleConfirm('cancel')}>
               Cancel
             </Button>
@@ -38,9 +37,11 @@ export function ConfirmDialog() {
             >
               {request.confirmLabel}
             </Button>
-          </Group>
-        </>
-      )}
-    </Modal>
+          </>
+        )
+      }
+    >
+      {request && <Text size="sm">{request.message}</Text>}
+    </AppModal>
   );
 }

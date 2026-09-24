@@ -2,7 +2,6 @@ import {
   Alert,
   Button,
   Group,
-  Modal,
   NumberInput,
   Select,
   Stack,
@@ -23,6 +22,7 @@ import {
   type TunnelProfile,
   type TunnelType,
 } from '@httpreq/shared';
+import { AppModal } from '../AppModal';
 import { VariableInput } from '../editor/VariableInput';
 import { yieldToHostKeyPrompt } from '../ssh/hostKeyPrompt';
 import { useSsh } from '../ssh/useSsh';
@@ -112,7 +112,7 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
   };
 
   return (
-    <Modal
+    <AppModal
       opened
       onClose={onClose}
       title="SSH tunnel"
@@ -120,6 +120,14 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
       centered
       // Starting a tunnel can raise the host-key question, which has to be answered first.
       {...yieldToHostKeyPrompt(!!ssh.pendingHostKey)}
+      footer={
+        <>
+          <Button variant="default" onClick={onClose}>
+            Cancel
+          </Button>
+          <Button onClick={onSave}>Save</Button>
+        </>
+      }
     >
       <Stack gap="sm">
         <TextInput
@@ -271,14 +279,7 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
           value={draft.description}
           onChange={(event) => patch({ description: event.currentTarget.value })}
         />
-
-        <Group justify="flex-end" gap="xs" mt="xs">
-          <Button variant="subtle" color="gray" onClick={onClose}>
-            Cancel
-          </Button>
-          <Button onClick={onSave}>Save</Button>
-        </Group>
       </Stack>
-    </Modal>
+    </AppModal>
   );
 }

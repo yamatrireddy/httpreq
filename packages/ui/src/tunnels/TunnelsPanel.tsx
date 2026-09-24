@@ -11,7 +11,7 @@ import {
   IconRouter,
   IconTrash,
 } from '@tabler/icons-react';
-import { useState } from 'react';
+import { useMemo, useState } from 'react';
 import { notifications } from '@mantine/notifications';
 import type { TunnelProfile, TunnelStatus } from '@httpreq/shared';
 import { confirmAction } from '../confirm';
@@ -22,6 +22,14 @@ import { TunnelDialog } from './TunnelDialog';
 import { useTunnels } from './useTunnels';
 import classes from '../ssh/Ssh.module.css';
 import { PanelHeader } from '../explorer/PanelHeader';
+import {
+  BulkButton,
+  BulkDeleteButton,
+  RowCheckbox,
+  SelectionBar,
+  SelectModeButton,
+} from '../explorer/Selection';
+import { useSelection } from '../explorer/useSelection';
 
 const STATUS_LABEL: Record<TunnelStatus, string> = {
   stopped: 'Stopped',
@@ -51,6 +59,8 @@ export function TunnelsPanel() {
   const states = useConnectionsStore((state) => state.tunnels);
   const api = useTunnels();
   const [editing, setEditing] = useState<string | null>(null);
+  const selection = useSelection(useMemo(() => profiles.map((tunnel) => tunnel.id), [profiles]));
+  const selected = () => profiles.filter((tunnel) => selection.isSelected(tunnel.id));
 
   const report = (error: Awaited<ReturnType<typeof api.start>>) => {
     if (error) {
@@ -70,9 +80,49 @@ export function TunnelsPanel() {
     deleteTunnel(tunnel.id);
   };
 
+  const startSelected = async () => {
+    const failures: string[] = [];
+    for (const tunnel of selected()) {
+      const status = states[tunnel.id]?.status ?? 'stopped';
+      if (status === 'active' || status === 'starting') continue;
+      const error = await api.start(tunnel);
+      if (error) failures.push(`${tunnel.name}: ${error.message}`);
+    }
+    if (failures.length) {
+      notifications.show({
+        color: 'red',
+        title: `${failures.length} tunnel${failures.length === 1 ? '' : 's'} not started`,
+        message: failures.join(' · '),
+      });
+    }
+  };
+
+  const stopSelected = async () => {
+    for (const tunnel of selected()) await api.stop(tunnel.id);
+  };
+
+  const removeSelected = async () => {
+    const tunnels = selected();
+    if (tunnels.length === 0) return;
+    const count = tunnels.length;
+    const result = await confirmAction({
+      title: count === 1 ? 'Delete tunnel' : `Delete ${count} tunnels`,
+      message: `Delete ${count === 1 ? `“${tunnels[0]!.name}”` : `${count} tunnels`}? Running tunnels are stopped first.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (result !== 'confirm') return;
+    for (const tunnel of tunnels) {
+      await api.stop(tunnel.id);
+      deleteTunnel(tunnel.id);
+    }
+    selection.stop();
+  };
+
   return (
     <div className={classes.panel}>
       <PanelHeader title="Tunnels">
+        <SelectModeButton selection={selection} noun="tunnels" />
         <Tooltip label="New tunnel">
           <ActionIcon
             variant="subtle"
@@ -85,6 +135,28 @@ export function TunnelsPanel() {
           </ActionIcon>
         </Tooltip>
       </PanelHeader>
+      <SelectionBar selection={selection} label="Tunnel selection">
+        <BulkButton
+          selection={selection}
+          label="Start"
+          title="Start selected tunnels"
+          icon={<IconPlayerPlay size={13} />}
+          onClick={() => void startSelected()}
+        />
+        <BulkButton
+          selection={selection}
+          color="gray"
+          label="Stop"
+          title="Stop selected tunnels"
+          icon={<IconPlayerStop size={13} />}
+          onClick={() => void stopSelected()}
+        />
+        <BulkDeleteButton
+          selection={selection}
+          noun="tunnels"
+          onDelete={() => void removeSelected()}
+        />
+      </SelectionBar>
 
       <div className={classes.list}>
         {profiles.length === 0 ? (
@@ -111,8 +183,21 @@ export function TunnelsPanel() {
             const transferred = state
               ? `${formatSize(state.bytesSent)} ↑ · ${formatSize(state.bytesReceived)} ↓`
               : '';
+            const checked = selection.isSelected(tunnel.id);
             return (
-              <div key={tunnel.id} className={classes.item}>
+              <div
+                key={tunnel.id}
+                className={classes.item}
+                data-checked={checked || undefined}
+                data-selectable={selection.selecting || undefined}
+              >
+                {selection.selecting && (
+                  <RowCheckbox
+                    checked={checked}
+                    label={tunnel.name}
+                    onChange={() => selection.toggle(tunnel.id)}
+                  />
+                )}
                 <IconRouter size={15} aria-hidden />
                 <button
                   type="button"
@@ -125,7 +210,10 @@ export function TunnelsPanel() {
                     cursor: 'pointer',
                     padding: 0,
                   }}
-                  onClick={() => setEditing(tunnel.id)}
+                  onClick={() =>
+                    selection.selecting ? selection.toggle(tunnel.id) : setEditing(tunnel.id)
+                  }
+                  tabIndex={selection.selecting ? -1 : undefined}
                   title={`${tunnel.localBindAddress}:${tunnel.localPort} → ${tunnel.remoteHost}:${tunnel.remotePort}`}
                 >
                   <span className={classes.itemName}>
@@ -153,7 +241,7 @@ export function TunnelsPanel() {
                     </span>
                   )}
                 </button>
-                <span className={classes.itemActions}>
+                <span className={classes.itemActions} hidden={selection.selecting}>
                   {running ? (
                     <Tooltip label="Stop tunnel">
                       <ActionIcon

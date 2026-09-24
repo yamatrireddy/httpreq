@@ -1,6 +1,6 @@
 import { Badge, Tabs } from '@mantine/core';
 import { notifications } from '@mantine/notifications';
-import { useCallback, useMemo, type Ref } from 'react';
+import { useCallback, useMemo, useRef, type Ref } from 'react';
 import {
   findHeaderConflicts,
   previewGeneratedHeaders,
@@ -87,6 +87,10 @@ export function RequestEditor({
   const dirty = useWorkbenchStore((state) => !!state.drafts[requestId]);
   const saveStatus = useWorkbenchStore((state) => state.saveStatus[requestId]);
   const tab = useWorkbenchStore((state) => state.editorTabs[requestId] ?? 'params');
+  // Body and Scripts hold Monaco editors. Once opened they stay mounted (hidden) while another
+  // tab is shown, so switching back is instant instead of rebuilding the editor.
+  const visited = useRef(new Set<EditorTab>());
+  visited.current.add(tab);
   const lastRun = useWorkbenchStore((state) =>
     state.history.find((entry) => entry.requestId === requestId),
   );
@@ -262,7 +266,11 @@ export function RequestEditor({
             onChange={(params) => onChange({ params, url: urlWithParams(request.url, params) })}
           />
         </Tabs.Panel>
-        <Tabs.Panel value="body" className={`${classes.panel} ${classes.fillPanel}`}>
+        <Tabs.Panel
+          value="body"
+          keepMounted={visited.current.has('body')}
+          className={`${classes.panel} ${classes.fillPanel}`}
+        >
           <BodyPanel request={request} onChange={onChange} />
         </Tabs.Panel>
         <Tabs.Panel value="headers" className={classes.panel}>
@@ -297,7 +305,11 @@ export function RequestEditor({
             onShowSource={revealNode}
           />
         </Tabs.Panel>
-        <Tabs.Panel value="scripts" className={`${classes.panel} ${classes.fillPanel}`}>
+        <Tabs.Panel
+          value="scripts"
+          keepMounted={visited.current.has('scripts')}
+          className={`${classes.panel} ${classes.fillPanel}`}
+        >
           <ScriptsPanel request={request} onChange={onChange} />
         </Tabs.Panel>
         <Tabs.Panel value="sharing" className={classes.panel}>
