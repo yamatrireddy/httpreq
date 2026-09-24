@@ -79,6 +79,8 @@ export interface HistoryRepository {
   list(workspaceId: string): Promise<HistoryEntry[]>;
   /** Adds an entry and returns the retained list, newest first. */
   add(workspaceId: string, entry: HistoryEntry): Promise<HistoryEntry[]>;
+  /** Deletes the given entries and returns what is left, newest first. */
+  remove(workspaceId: string, entryIds: string[]): Promise<HistoryEntry[]>;
   clear(workspaceId: string): Promise<void>;
 }
 
@@ -133,6 +135,9 @@ export const WINDOW_ACTIONS = [
   'zoom-in',
   'zoom-out',
   'zoom-reset',
+  'minimize',
+  'toggle-maximize',
+  'close',
   'toggle-fullscreen',
   'toggle-devtools',
   'quit',
@@ -146,6 +151,7 @@ export const isWindowAction = (value: unknown): value is WindowAction =>
 /** Application commands the native (macOS) menu forwards to the renderer. */
 export const MENU_COMMANDS = [
   'request.new',
+  'file.import',
   'request.close',
   'request.save',
   'request.send',
@@ -177,20 +183,12 @@ export interface AppInfo {
   versions: { electron: string; chrome: string; node: string };
 }
 
-export interface TitleBarTheme {
-  /** `#rrggbb` background of the native window-controls overlay. */
-  color: string;
-  /** `#rrggbb` color of the native window-control symbols. */
-  symbolColor: string;
-}
-
 /** Desktop-shell operations exposed by the preload. Every call is validated in the main process. */
 export interface DesktopBridge {
   readonly platform: string;
   getAppInfo(): Promise<AppInfo>;
   getWindowState(): Promise<DesktopWindowState>;
   performAction(action: WindowAction): void;
-  setTitleBarTheme(theme: TitleBarTheme): void;
   /** Opens an allow-listed documentation URL in the system browser. */
   openExternal(url: string): void;
   /** Opens an OAuth 2.0 authorization page (http/https only) in the system browser. */

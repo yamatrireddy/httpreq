@@ -5,7 +5,6 @@ import {
   CopyButton,
   Divider,
   Group,
-  Modal,
   Select,
   SimpleGrid,
   Stack,
@@ -25,6 +24,7 @@ import {
   type OAuthTokens,
 } from '@httpreq/api-client';
 import { OAUTH2_GRANT_TYPES, type OAuth2Auth, type OAuth2GrantType } from '@httpreq/shared';
+import { AppModal } from '../AppModal';
 import { useAuthServices, type AuthEditorProps } from './authServices';
 import { Field } from './Field';
 
@@ -290,11 +290,21 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
         )}
       </Group>
 
-      <Modal
+      <AppModal
         opened={!!pending}
         onClose={() => setPending(null)}
         title="Authorize HttpReq"
         size="lg"
+        footer={
+          <>
+            <Button variant="default" onClick={() => setPending(null)}>
+              Cancel
+            </Button>
+            <Button loading={busy} disabled={!redirect.trim()} onClick={() => void exchange()}>
+              Exchange code
+            </Button>
+          </>
+        }
       >
         {pending && (
           <Stack gap="sm">
@@ -335,17 +345,9 @@ export function OAuth2Editor({ config, onChange }: AuthEditorProps<OAuth2Auth>) 
                 </Text>
               </Alert>
             )}
-            <Group justify="flex-end">
-              <Button variant="default" onClick={() => setPending(null)}>
-                Cancel
-              </Button>
-              <Button loading={busy} disabled={!redirect.trim()} onClick={() => void exchange()}>
-                Exchange code
-              </Button>
-            </Group>
           </Stack>
         )}
-      </Modal>
+      </AppModal>
     </Stack>
   );
 }

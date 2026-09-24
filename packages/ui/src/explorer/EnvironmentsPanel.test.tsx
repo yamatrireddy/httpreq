@@ -2,6 +2,7 @@ import { beforeEach, describe, expect, it } from 'vitest';
 import { act, fireEvent, render, screen } from '@testing-library/react';
 import { MantineProvider } from '@mantine/core';
 import { createWorkspace } from '@httpreq/workspace';
+import { settleConfirm, useConfirmStore } from '../confirm';
 import { useWorkbenchStore } from '../store';
 import { EnvironmentEditor } from '../environment/EnvironmentEditor';
 import { EnvironmentsPanel } from './EnvironmentsPanel';
@@ -63,5 +64,37 @@ describe('editing environments', () => {
     expect(state().openEnvironmentTabIds).toEqual([development!.id, production!.id]);
     expect(state().activeEnvironmentTabId).toBe(development!.id);
     expect(screen.getByLabelText('Environment name')).toHaveValue('Development');
+  });
+
+  it('selects several environments and deletes them together after confirming', async () => {
+    act(() => {
+      for (const name of ['Development', 'Staging', 'Production']) {
+        state().updateEnvironment(state().createEnvironment(), { name });
+      }
+    });
+    const [, staging, production] = state().workspace.environments;
+    act(() => state().setActiveEnvironment(staging!.id));
+
+    fireEvent.click(screen.getByRole('button', { name: 'Select environments' }));
+    expect(screen.getByText('0 selected')).toBeInTheDocument();
+    expect(screen.getByRole('button', { name: /Delete selected/ })).toBeDisabled();
+
+    fireEvent.click(screen.getByLabelText('Select all'));
+    expect(screen.getByText('3 selected')).toBeInTheDocument();
+    fireEvent.click(screen.getByRole('checkbox', { name: 'Production' }));
+    expect(screen.getByText('2 selected')).toBeInTheDocument();
+
+    fireEvent.click(screen.getByRole('button', { name: /Delete selected/ }));
+    expect(useConfirmStore.getState().request?.title).toBe('Delete 2 environments');
+    // Nothing is deleted until the user confirms.
+    expect(state().workspace.environments).toHaveLength(3);
+    await act(async () => settleConfirm('confirm'));
+
+    expect(state().workspace.environments.map((environment) => environment.id)).toEqual([
+      production!.id,
+    ]);
+    expect(state().workspace.activeEnvironmentId).toBeNull();
+    // Selection mode ends once the deletion is done.
+    expect(screen.queryByText(/selected$/)).not.toBeInTheDocument();
   });
 });

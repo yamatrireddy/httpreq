@@ -16,9 +16,12 @@ import {
   IconTrash,
   IconVariable,
 } from '@tabler/icons-react';
+import { useMemo } from 'react';
 import { confirmAction } from '../confirm';
 import { useWorkbenchStore } from '../store';
 import { PanelHeader } from './PanelHeader';
+import { BulkDeleteButton, RowCheckbox, SelectionBar, SelectModeButton } from './Selection';
+import { useSelection } from './useSelection';
 import classes from './Sidebar.module.css';
 
 interface Props {
@@ -28,13 +31,35 @@ interface Props {
 
 /**
  * Lists the environments and picks the active one. Editing happens in the environment's own tab
- * beside the request tabs, so several can be open at once.
+ * beside the request tabs, so several can be open at once. A selection mode swaps the radios for
+ * checkboxes so several environments can be deleted together.
  */
 export function EnvironmentsPanel({ onOpened }: Props) {
   const environments = useWorkbenchStore((state) => state.workspace.environments);
   const activeId = useWorkbenchStore((state) => state.workspace.activeEnvironmentId);
   const openTabId = useWorkbenchStore((state) => state.activeEnvironmentTabId);
   const actions = useWorkbenchStore.getState;
+  const selection = useSelection(
+    useMemo(() => environments.map((environment) => environment.id), [environments]),
+  );
+
+  const removeSelected = async () => {
+    const selected = environments.filter((environment) => selection.isSelected(environment.id));
+    if (selected.length === 0) return;
+    const count = selected.length;
+    const result = await confirmAction({
+      title: count === 1 ? 'Delete environment' : `Delete ${count} environments`,
+      message:
+        count === 1
+          ? `Delete “${selected[0]!.name}” and its variables? This cannot be undone.`
+          : `Delete ${count} environments and all of their variables? This cannot be undone.`,
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (result !== 'confirm') return;
+    actions().deleteEnvironments(selected.map((environment) => environment.id));
+    selection.stop();
+  };
 
   const edit = (id: string, naming = false) => {
     actions().openEnvironmentTab(id, { naming });
@@ -55,6 +80,7 @@ export function EnvironmentsPanel({ onOpened }: Props) {
   return (
     <div className={classes.explorer}>
       <PanelHeader title="Environments">
+        <SelectModeButton selection={selection} noun="environments" />
         <Tooltip label="New environment">
           <ActionIcon
             variant="subtle"
@@ -67,78 +93,112 @@ export function EnvironmentsPanel({ onOpened }: Props) {
           </ActionIcon>
         </Tooltip>
       </PanelHeader>
-      <Text size="xs" c="dimmed" px={12} py={6}>
-        The active environment resolves <code>{'{{variables}}'}</code> when a request is sent.
-      </Text>
-      <Radio.Group
-        value={activeId ?? ''}
-        onChange={(value) => actions().setActiveEnvironment(value || null)}
-        aria-label="Active environment"
-      >
+      {selection.selecting ? (
+        <SelectionBar selection={selection} label="Environment selection">
+          <BulkDeleteButton
+            selection={selection}
+            noun="environments"
+            onDelete={() => void removeSelected()}
+          />
+        </SelectionBar>
+      ) : (
+        <Text size="xs" c="dimmed" px={12} py={6}>
+          The active environment resolves <code>{'{{variables}}'}</code> when a request is sent.
+        </Text>
+      )}
+      {selection.selecting ? (
         <Stack gap={1} className={classes.tree}>
-          <div className={classes.envRow}>
-            <Radio value="" label="No environment" size="xs" />
-          </div>
           {environments.map((environment) => (
             <div
               key={environment.id}
               className={classes.envRow}
-              data-selected={environment.id === activeId || undefined}
-              data-editing={environment.id === openTabId || undefined}
+              data-checked={selection.isSelected(environment.id) || undefined}
+              data-selectable
+              onClick={() => selection.toggle(environment.id)}
             >
-              <Radio value={environment.id} aria-label={`Use ${environment.name}`} size="xs" />
-              <UnstyledButton
-                className={classes.envName}
-                aria-current={environment.id === openTabId ? 'page' : undefined}
-                title={`Edit “${environment.name}” in a tab`}
-                onClick={() => edit(environment.id)}
-              >
+              <RowCheckbox
+                checked={selection.isSelected(environment.id)}
+                label={environment.name}
+                onChange={() => selection.toggle(environment.id)}
+              />
+              <span className={classes.envName}>
                 <IconVariable size={14} aria-hidden />
                 <span className={classes.rowName}>{environment.name}</span>
-                <Text span size="xs" c="dimmed">
-                  {
-                    environment.variables.filter((variable) => variable.enabled && variable.key)
-                      .length
-                  }
-                </Text>
-              </UnstyledButton>
-              <Menu position="bottom-end" withinPortal shadow="md">
-                <Menu.Target>
-                  <ActionIcon
-                    variant="subtle"
-                    color="gray"
-                    size="xs"
-                    aria-label={`Actions for ${environment.name}`}
-                  >
-                    <IconDots size={13} />
-                  </ActionIcon>
-                </Menu.Target>
-                <Menu.Dropdown>
-                  <Menu.Item
-                    leftSection={<IconPencil size={14} />}
-                    onClick={() => edit(environment.id)}
-                  >
-                    Edit variables
-                  </Menu.Item>
-                  <Menu.Item
-                    leftSection={<IconCopy size={14} />}
-                    onClick={() => actions().duplicateEnvironment(environment.id)}
-                  >
-                    Duplicate
-                  </Menu.Item>
-                  <Menu.Item
-                    color="red"
-                    leftSection={<IconTrash size={14} />}
-                    onClick={() => void remove(environment.id, environment.name)}
-                  >
-                    Delete
-                  </Menu.Item>
-                </Menu.Dropdown>
-              </Menu>
+              </span>
             </div>
           ))}
         </Stack>
-      </Radio.Group>
+      ) : (
+        <Radio.Group
+          value={activeId ?? ''}
+          onChange={(value) => actions().setActiveEnvironment(value || null)}
+          aria-label="Active environment"
+        >
+          <Stack gap={1} className={classes.tree}>
+            <div className={classes.envRow}>
+              <Radio value="" label="No environment" size="xs" />
+            </div>
+            {environments.map((environment) => (
+              <div
+                key={environment.id}
+                className={classes.envRow}
+                data-selected={environment.id === activeId || undefined}
+                data-editing={environment.id === openTabId || undefined}
+              >
+                <Radio value={environment.id} aria-label={`Use ${environment.name}`} size="xs" />
+                <UnstyledButton
+                  className={classes.envName}
+                  aria-current={environment.id === openTabId ? 'page' : undefined}
+                  title={`Edit “${environment.name}” in a tab`}
+                  onClick={() => edit(environment.id)}
+                >
+                  <IconVariable size={14} aria-hidden />
+                  <span className={classes.rowName}>{environment.name}</span>
+                  <Text span size="xs" c="dimmed">
+                    {
+                      environment.variables.filter((variable) => variable.enabled && variable.key)
+                        .length
+                    }
+                  </Text>
+                </UnstyledButton>
+                <Menu position="bottom-end" withinPortal shadow="md">
+                  <Menu.Target>
+                    <ActionIcon
+                      variant="subtle"
+                      color="gray"
+                      size="xs"
+                      aria-label={`Actions for ${environment.name}`}
+                    >
+                      <IconDots size={13} />
+                    </ActionIcon>
+                  </Menu.Target>
+                  <Menu.Dropdown>
+                    <Menu.Item
+                      leftSection={<IconPencil size={14} />}
+                      onClick={() => edit(environment.id)}
+                    >
+                      Edit variables
+                    </Menu.Item>
+                    <Menu.Item
+                      leftSection={<IconCopy size={14} />}
+                      onClick={() => actions().duplicateEnvironment(environment.id)}
+                    >
+                      Duplicate
+                    </Menu.Item>
+                    <Menu.Item
+                      color="red"
+                      leftSection={<IconTrash size={14} />}
+                      onClick={() => void remove(environment.id, environment.name)}
+                    >
+                      Delete
+                    </Menu.Item>
+                  </Menu.Dropdown>
+                </Menu>
+              </div>
+            ))}
+          </Stack>
+        </Radio.Group>
+      )}
       {environments.length === 0 && (
         <Stack align="flex-start" px={12} py="sm" gap="xs">
           <Text size="xs" c="dimmed">

@@ -46,6 +46,9 @@ import type { CommandMap } from './commands';
 import { useShortcutManager } from './commands';
 import { closeTabs as closeRequestTabs } from './closeTabs';
 import { ConfirmDialog } from './ConfirmDialog';
+import { preloadEditor } from './editor/preloadEditor';
+import { ImportDialog } from './import/ImportDialog';
+import { openImportDialog } from './import/importDialogStore';
 import {
   browserConnectivityProbe,
   reportRequestConnectivity,
@@ -111,6 +114,8 @@ const menus: MenuDefinition[] = [
       { command: 'request.new' },
       { command: 'websocket.new' },
       { command: 'collection.new' },
+      { separator: true },
+      { command: 'file.import' },
       { separator: true },
       { command: 'request.save' },
       { separator: true },
@@ -198,10 +203,13 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
   const [opened, { toggle, close: closeNav }] = useDisclosure();
   const [dialog, setDialog] = useState<Dialog | null>(null);
   const { toggleColorScheme } = useMantineColorScheme();
-  const { loaded, saveRequest, recordHistory, clearHistory, workspaceActions } = usePersistence(
-    repository,
-    history,
-  );
+  const { loaded, saveRequest, recordHistory, clearHistory, removeHistory, workspaceActions } =
+    usePersistence(repository, history);
+
+  // Once the workspace is on screen, load Monaco in the background for the first editor.
+  useEffect(() => {
+    if (loaded) preloadEditor();
+  }, [loaded]);
 
   const capabilities = useMemo(() => detectCapabilities(bridge), [bridge]);
   const webSocketRuntime = useMemo(
@@ -541,6 +549,7 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
         run: newWebSocket,
       },
       'collection.new': { label: 'New Collection', run: () => void createCollection() },
+      'file.import': { label: 'Import…', run: () => openImportDialog() },
       'request.save': {
         label: 'Save',
         shortcut: [{ key: 's', mod: true }],
@@ -826,7 +835,11 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                   </AppShell.Header>
 
                   <AppShell.Navbar className={classes.navbar} aria-label="Sidebar">
-                    <Sidebar onClearHistory={clearHistory} onNavigate={closeNav} />
+                    <Sidebar
+                      onClearHistory={clearHistory}
+                      onRemoveHistory={removeHistory}
+                      onNavigate={closeNav}
+                    />
                   </AppShell.Navbar>
 
                   <AppShell.Main className={classes.main}>
@@ -983,6 +996,7 @@ export function HttpReqApp({ runtime, repository, history, desktop, bridge, vers
                     desktop={desktop}
                     onOpenDocumentation={openDocumentation}
                   />
+                  <ImportDialog />
                   <ConfirmDialog />
                   <HostKeyDialog />
                 </AppShell>

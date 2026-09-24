@@ -134,8 +134,15 @@ interface WorkbenchState {
   duplicateNode: (id: string) => void;
   deleteNode: (id: string) => void;
   updateContainer: (id: string, patch: { auth?: AuthConfig; description?: string }) => void;
-  /** Adopts a workspace that gained imported nodes and reveals the imported root. */
-  applyImport: (workspace: Workspace, rootId: string, kind: 'collection' | 'request') => void;
+  /**
+   * Adopts a workspace that gained imported data. An imported collection is revealed and an
+   * imported request opened; an imported environment just appears in the environment picker.
+   */
+  applyImport: (
+    workspace: Workspace,
+    rootId: string | null,
+    kind: 'collection' | 'request' | 'environment',
+  ) => void;
   selectNode: (id: string | null) => void;
   toggleExpanded: (id: string, expanded?: boolean) => void;
   revealNode: (id: string) => void;
@@ -147,6 +154,8 @@ interface WorkbenchState {
   /** Returns the copy's id, or null when there is no such environment. */
   duplicateEnvironment: (id: string) => string | null;
   deleteEnvironment: (id: string) => void;
+  /** Deletes several environments in one change, closing their tabs. */
+  deleteEnvironments: (ids: Iterable<string>) => void;
   setActiveEnvironment: (id: string | null) => void;
   /** Creates or updates a variable in the active environment (e.g. a retrieved OAuth token). */
   setEnvironmentVariable: (key: string, value: string, secret: boolean) => boolean;
@@ -605,6 +614,10 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     }),
 
   applyImport: (workspace, rootId, kind) => {
+    if (kind === 'environment' || !rootId) {
+      set({ workspace });
+      return;
+    }
     set((state) => ({
       workspace,
       selectedNodeId: rootId,
@@ -675,15 +688,23 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
     return copy.id;
   },
 
-  deleteEnvironment: (id) => {
-    get().closeEnvironmentTabs([id]);
-    set((state) => ({
-      workspace: touch(state.workspace, {
-        environments: state.workspace.environments.filter((environment) => environment.id !== id),
-        activeEnvironmentId:
-          state.workspace.activeEnvironmentId === id ? null : state.workspace.activeEnvironmentId,
-      }),
-    }));
+  deleteEnvironment: (id) => get().deleteEnvironments([id]),
+
+  deleteEnvironments: (ids) => {
+    const doomed = new Set(ids);
+    if (doomed.size === 0) return;
+    get().closeEnvironmentTabs(doomed);
+    set((state) => {
+      const activeId = state.workspace.activeEnvironmentId;
+      return {
+        workspace: touch(state.workspace, {
+          environments: state.workspace.environments.filter(
+            (environment) => !doomed.has(environment.id),
+          ),
+          activeEnvironmentId: activeId && doomed.has(activeId) ? null : activeId,
+        }),
+      };
+    });
   },
 
   setActiveEnvironment: (activeEnvironmentId) =>

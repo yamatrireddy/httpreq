@@ -95,7 +95,6 @@ const desktop: DesktopBridge = {
   getAppInfo: () => ipcRenderer.invoke('app:info'),
   getWindowState: () => ipcRenderer.invoke('window:state'),
   performAction: (action) => ipcRenderer.send('window:action', action),
-  setTitleBarTheme: (theme) => ipcRenderer.send('window:title-bar-theme', theme),
   openExternal: (url) => ipcRenderer.send('shell:open-external', url),
   openAuthorizationUrl: (url) => ipcRenderer.send('shell:open-authorization-url', url),
   checkConnectivity: () => ipcRenderer.invoke('net:check'),

@@ -67,10 +67,42 @@
   flex: 0 0 64px;
 }
 
-/* Room for the native minimise/maximise/close overlay on Windows and Linux. */
+/* The app's own minimise/maximise/close buttons on Windows and Linux. */
 .windowControls {
+  display: flex;
+  align-items: stretch;
   flex: 0 0 auto;
-  width: calc(100vw - env(titlebar-area-x, 0px) - env(titlebar-area-width, calc(100vw - 138px)));
+  margin-left: 4px;
+}
+
+.windowButton {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  width: 46px;
+  color: inherit;
+  transition:
+    background-color 120ms ease,
+    color 120ms ease;
+}
+
+.windowButton:hover {
+  background: var(--hr-menu-hover-bg);
+}
+
+.windowButton:active {
+  background: var(--hr-menu-open-bg);
+}
+
+.windowButton:focus-visible {
+  outline: 2px solid var(--mantine-primary-color-filled);
+  outline-offset: -2px;
+}
+
+.closeButton:hover,
+.closeButton:active {
+  background: #c42b1c;
+  color: #fff;
 }
 
 .brand {

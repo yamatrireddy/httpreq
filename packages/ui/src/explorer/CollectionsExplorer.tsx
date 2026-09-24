@@ -1,5 +1,4 @@
-import { ActionIcon, CloseButton, FileButton, Menu, Text, TextInput, Tooltip } from '@mantine/core';
-import { notifications } from '@mantine/notifications';
+import { ActionIcon, CloseButton, Menu, Text, TextInput, Tooltip } from '@mantine/core';
 import {
   IconBolt,
   IconBox,
@@ -16,6 +15,7 @@ import {
   IconPlus,
   IconSearch,
   IconSettings,
+  IconTerminal2,
   IconTrash,
 } from '@tabler/icons-react';
 import { flushSync } from 'react-dom';
@@ -30,13 +30,16 @@ import {
   type KeyboardEvent,
   type MouseEvent,
 } from 'react';
-import { collectSubtree, findNode, isLeafNode } from '@httpreq/workspace';
+import { collectSubtree, findNode, getAncestors, isLeafNode } from '@httpreq/workspace';
 import { confirmAction } from '../confirm';
-import { downloadJson, exportCollection, fileNameFor, importFile } from '../exchange';
+import { downloadJson, exportCollection, fileNameFor } from '../exchange';
+import { openImportDialog } from '../import/importDialogStore';
 import { isLeafRow, methodColor } from '../methods';
 import { useWorkbenchStore } from '../store';
 import { buildRows, type TreeRow } from './rows';
 import { PanelHeader } from './PanelHeader';
+import { BulkDeleteButton, RowCheckbox, SelectionBar, SelectModeButton } from './Selection';
+import { useSelection } from './useSelection';
 import classes from './Sidebar.module.css';
 
 const DRAG_TYPE = 'application/x-httpreq-node';
@@ -63,6 +66,8 @@ const OVERSCAN = 12;
  */
 interface RowHandlers {
   open: (row: TreeRow) => void;
+  /** Selection mode: checks or unchecks a row. */
+  check: (id: string) => void;
   focus: (id: string) => void;
   menuChange: (id: string, opened: boolean) => void;
   rename: (id: string, name: string) => void;
@@ -135,6 +140,9 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
     return result;
   }, [workspace, expandedIds, filter]);
   const rows = useMemo(() => [...collections, ...draftRows], [collections, draftRows]);
+  // Select all takes the rows that are listed: a filter narrows it, collapsed children are
+  // covered by their collection or folder.
+  const selection = useSelection(useMemo(() => rows.map((row) => row.id), [rows]));
   const rovingId = rows.some((row) => row.id === focusedId)
     ? focusedId
     : rows.some((row) => row.id === selectedId)
@@ -241,24 +249,53 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
     if (result === 'confirm') actions().deleteNode(id);
   };
 
+  /**
+   * Deletes the checked items. A checked item inside a checked collection or folder goes with its
+   * container, so it is neither deleted twice nor counted twice.
+   */
+  const removeSelected = async () => {
+    const { workspace: current, drafts } = actions();
+    const checked = new Set(selection.ids);
+    const roots = selection.ids.filter(
+      (id) => !getAncestors(current, id).some((ancestor) => checked.has(ancestor.node.id)),
+    );
+    if (roots.length === 0) return;
+    const requests = new Set<string>();
+    for (const id of roots) {
+      const node = findNode(current, id);
+      if (!node) continue;
+      if (isLeafNode(node)) requests.add(id);
+      else {
+        const subtree = collectSubtree(current, id);
+        for (const requestId of [...subtree.requests, ...subtree.websockets])
+          requests.add(requestId);
+      }
+    }
+    const unsavedCount = [...requests].filter((requestId) => drafts[requestId]).length;
+    const containers = roots.length - roots.filter((id) => requests.has(id)).length;
+    const parts = [
+      containers &&
+        `${containers} collection${containers === 1 ? '' : 's'} or folder${containers === 1 ? '' : 's'}`,
+      requests.size && `${requests.size} request${requests.size === 1 ? '' : 's'}`,
+    ].filter(Boolean);
+    const result = await confirmAction({
+      title: `Delete ${roots.length} item${roots.length === 1 ? '' : 's'}`,
+      message:
+        `Delete ${parts.join(' and ')}? This cannot be undone.` +
+        (unsavedCount
+          ? ` ${unsavedCount} open request${unsavedCount === 1 ? ' has' : 's have'} unsaved changes.`
+          : ''),
+      confirmLabel: 'Delete',
+      danger: true,
+    });
+    if (result !== 'confirm') return;
+    for (const id of roots) actions().deleteNode(id);
+    selection.stop();
+  };
+
   const exportNode = (id: string) => {
     const data = exportCollection(actions().workspace, id);
     if (data) downloadJson(fileNameFor(data.collection.name, 'collection'), data);
-  };
-
-  const importFromFile = async (file: File | null) => {
-    if (!file) return;
-    try {
-      const result = importFile(actions().workspace, await file.text());
-      actions().applyImport(result.workspace, result.rootId, result.kind);
-      notifications.show({ color: 'teal', message: `Imported “${file.name}”.` });
-    } catch (error) {
-      notifications.show({
-        color: 'red',
-        title: 'Import failed',
-        message: (error as Error).message,
-      });
-    }
   };
 
   const onKeyDown = (event: KeyboardEvent<HTMLDivElement>) => {
@@ -303,15 +340,17 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       case 'Enter':
       case ' ':
         handled();
-        open(row);
+        if (selection.selecting) selection.toggle(row.id);
+        else open(row);
         break;
       case 'F2':
         handled();
-        actions().setRenaming(row.id);
+        if (!selection.selecting) actions().setRenaming(row.id);
         break;
       case 'Delete':
         handled();
-        void remove(row.id);
+        if (selection.selecting) void removeSelected();
+        else void remove(row.id);
         break;
     }
   };
@@ -347,11 +386,12 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
 
   // Created once; each handler calls through to the closures of the latest render, so the object
   // stays stable without going stale.
-  const latest = useRef({ open, remove, exportNode, canDrop, onDrop, onOpenSettings });
-  latest.current = { open, remove, exportNode, canDrop, onDrop, onOpenSettings };
+  const latest = useRef({ open, remove, exportNode, canDrop, onDrop, onOpenSettings, selection });
+  latest.current = { open, remove, exportNode, canDrop, onDrop, onOpenSettings, selection };
   const handlers = useMemo<RowHandlers>(
     () => ({
       open: (row) => latest.current.open(row),
+      check: (id) => latest.current.selection.toggle(id),
       focus: setFocusedId,
       menuChange: (id, opened) =>
         setMenuFor((current) => (opened ? id : current === id ? null : current)),
@@ -404,6 +444,8 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
       anyRenaming={renamingId !== null}
       dropTarget={drop === row.id}
       menuOpen={menuFor === row.id}
+      selecting={selection.selecting}
+      checked={selection.selecting && selection.isSelected(row.id)}
       handlers={handlers}
     />
   );
@@ -417,6 +459,7 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
   return (
     <div className={classes.explorer}>
       <PanelHeader title="Collections">
+        <SelectModeButton selection={selection} noun="collections and requests" />
         <Tooltip label="New collection">
           <ActionIcon
             variant="subtle"
@@ -450,16 +493,19 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
             >
               New draft request
             </Menu.Item>
-            <FileButton
-              onChange={(file) => void importFromFile(file)}
-              accept="application/json,.json"
+            <Menu.Divider />
+            <Menu.Item
+              leftSection={<IconFileImport size={14} />}
+              onClick={() => openImportDialog('files')}
             >
-              {(props) => (
-                <Menu.Item {...props} leftSection={<IconFileImport size={14} />}>
-                  Import…
-                </Menu.Item>
-              )}
-            </FileButton>
+              Import files or folders…
+            </Menu.Item>
+            <Menu.Item
+              leftSection={<IconTerminal2 size={14} />}
+              onClick={() => openImportDialog('curl')}
+            >
+              Import from cURL…
+            </Menu.Item>
             <Menu.Divider />
             <Menu.Item
               leftSection={<IconFold size={14} />}
@@ -470,6 +516,13 @@ export function CollectionsExplorer({ onOpenSettings, onOpened }: Props) {
           </Menu.Dropdown>
         </Menu>
       </PanelHeader>
+      <SelectionBar selection={selection} label="Collection selection">
+        <BulkDeleteButton
+          selection={selection}
+          noun="items"
+          onDelete={() => void removeSelected()}
+        />
+      </SelectionBar>
 
       <TextInput
         size="xs"
@@ -567,6 +620,9 @@ interface RowProps {
   anyRenaming: boolean;
   dropTarget: boolean;
   menuOpen: boolean;
+  /** Selection mode: rows show a checkbox and a click checks them instead of opening them. */
+  selecting: boolean;
+  checked: boolean;
   handlers: RowHandlers;
 }
 
@@ -580,6 +636,8 @@ const ExplorerRow = memo(function ExplorerRow({
   anyRenaming,
   dropTarget,
   menuOpen,
+  selecting,
+  checked,
   handlers,
 }: RowProps) {
   const container = !isLeafRow(row.kind);
@@ -605,27 +663,42 @@ const ExplorerRow = memo(function ExplorerRow({
       aria-current={active ? 'page' : undefined}
       tabIndex={tabbable ? 0 : -1}
       className={classes.row}
-      data-selected={selected || undefined}
+      data-selected={(selecting ? checked : selected) || undefined}
       data-drop={dropTarget || undefined}
       style={{ paddingLeft: 6 + row.depth * INDENT }}
-      onClick={() => handlers.open(row)}
+      onClick={() => (selecting ? handlers.check(row.id) : handlers.open(row))}
       onFocus={(event) => event.target === event.currentTarget && handlers.focus(row.id)}
-      onContextMenu={onContextMenu}
+      onContextMenu={selecting ? undefined : onContextMenu}
       onDoubleClick={(event) => {
-        if (isLeafRow(row.kind)) {
+        if (!selecting && isLeafRow(row.kind)) {
           event.preventDefault();
           handlers.startRename(row.id);
         }
       }}
       title={row.url ? `${row.kind === 'websocket' ? 'WS' : row.method} ${row.url}` : row.name}
-      draggable={!renaming}
+      draggable={!renaming && !selecting}
       onDragStart={(event) => handlers.dragStart(row, event)}
       onDragEnd={handlers.dragEnd}
       onDragOver={(event) => handlers.dragOver(row, row.id, event)}
       onDragLeave={(event) => handlers.dragLeave(row.id, event)}
       onDrop={(event) => handlers.drop(row, event)}
     >
-      <span className={classes.chevron} data-open={row.expanded || undefined} aria-hidden>
+      {selecting && (
+        <RowCheckbox checked={checked} label={row.name} onChange={() => handlers.check(row.id)} />
+      )}
+      <span
+        className={classes.chevron}
+        data-open={row.expanded || undefined}
+        aria-hidden
+        onClick={
+          selecting && container
+            ? (event) => {
+                event.stopPropagation();
+                handlers.open(row);
+              }
+            : undefined
+        }
+      >
         {container && row.hasChildren && <IconChevronRight size={13} />}
       </span>
       {row.kind === 'request' ? (
@@ -667,6 +740,7 @@ const ExplorerRow = memo(function ExplorerRow({
       <span
         className={classes.rowActions}
         data-open={menuOpen || undefined}
+        hidden={selecting}
         onClick={(event) => event.stopPropagation()}
       >
         {container && (

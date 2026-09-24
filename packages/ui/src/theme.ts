@@ -16,7 +16,8 @@ export const httpReqTheme = createTheme({
   defaultRadius: 'sm',
   spacing: { xs: rem(8), sm: rem(10), md: rem(14), lg: rem(20), xl: rem(28) },
   components: {
-    Button: { defaultProps: { size: 'sm' } },
+    // Buttons sit one step below the inputs on Mantine's scale, which suits the dense desktop layout.
+    Button: { defaultProps: { size: 'xs' } },
     Input: { defaultProps: { size: 'sm' } },
     Select: { defaultProps: { size: 'sm' } },
     Tabs: { defaultProps: { keepMounted: false } },

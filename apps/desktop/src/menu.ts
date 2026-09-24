@@ -46,6 +46,8 @@ export const buildMacMenu = ({ command, openExternal }: MacMenuHandlers) => {
       submenu: [
         item('New Request', 'request.new', 'Cmd+T'),
         { type: 'separator' },
+        item('Import…', 'file.import'),
+        { type: 'separator' },
         item('Save', 'request.save', 'Cmd+S'),
         { type: 'separator' },
         item('Close Request', 'request.close', 'Cmd+W'),

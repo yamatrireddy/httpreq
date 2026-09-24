@@ -3,7 +3,6 @@ import { describe, expect, it } from 'vitest';
 import {
   isAllowedExternalUrl,
   isAuthorizationUrl,
-  isTitleBarTheme,
   isTrustedRendererUrl,
   nextZoomLevel,
   MAX_ZOOM_LEVEL,
@@ -28,12 +27,6 @@ describe('desktop shell IPC validation', () => {
     expect(isAllowedExternalUrl('http://github.com/yamatrireddy/httpreq')).toBe(false);
     expect(isAllowedExternalUrl('file:///etc/passwd')).toBe(false);
     expect(isAllowedExternalUrl(42)).toBe(false);
-  });
-
-  it('accepts only #rrggbb title bar colours', () => {
-    expect(isTitleBarTheme({ color: '#141414', symbolColor: '#C9C9C9' })).toBe(true);
-    expect(isTitleBarTheme({ color: 'red', symbolColor: '#ffffff' })).toBe(false);
-    expect(isTitleBarTheme(null)).toBe(false);
   });
 
   it('trusts only the app renderer origin', () => {
