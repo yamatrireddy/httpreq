@@ -13,8 +13,13 @@ import {
 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
 import { notifications } from '@mantine/notifications';
-import type { TunnelProfile, TunnelStatus } from '@httpreq/shared';
+import {
+  createTunnelProfile as newTunnelProfile,
+  type TunnelProfile,
+  type TunnelStatus,
+} from '@httpreq/shared';
 import { confirmAction } from '../confirm';
+import { editExisting, editNew, type EditTarget } from '../editTarget';
 import { useConnectionsStore } from '../connections';
 import { formatSize } from '../format';
 import { useWorkbenchStore } from '../store';
@@ -53,12 +58,13 @@ const uptime = (startedAt: string | null): string => {
 export function TunnelsPanel() {
   const profiles = useWorkbenchStore((state) => state.workspace.tunnelProfiles);
   const sshProfiles = useWorkbenchStore((state) => state.workspace.sshProfiles);
-  const createTunnel = useWorkbenchStore((state) => state.createTunnelProfile);
   const duplicateTunnel = useWorkbenchStore((state) => state.duplicateTunnelProfile);
   const deleteTunnel = useWorkbenchStore((state) => state.deleteTunnelProfile);
   const states = useConnectionsStore((state) => state.tunnels);
   const api = useTunnels();
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<EditTarget<TunnelProfile> | null>(null);
+  /** A new tunnel, not saved until the dialog's Save, carried by the first SSH connection. */
+  const startNew = () => setEditing(editNew(newTunnelProfile(sshProfiles[0]?.id ?? '')));
   const selection = useSelection(useMemo(() => profiles.map((tunnel) => tunnel.id), [profiles]));
   const selected = () => profiles.filter((tunnel) => selection.isSelected(tunnel.id));
 
@@ -129,7 +135,7 @@ export function TunnelsPanel() {
             color="gray"
             size="sm"
             aria-label="New tunnel"
-            onClick={() => setEditing(createTunnel())}
+            onClick={startNew}
           >
             <IconPlus size={15} />
           </ActionIcon>
@@ -170,7 +176,7 @@ export function TunnelsPanel() {
               size="xs"
               variant="light"
               leftSection={<IconPlus size={14} />}
-              onClick={() => setEditing(createTunnel())}
+              onClick={startNew}
             >
               New tunnel
             </Button>
@@ -211,7 +217,9 @@ export function TunnelsPanel() {
                     padding: 0,
                   }}
                   onClick={() =>
-                    selection.selecting ? selection.toggle(tunnel.id) : setEditing(tunnel.id)
+                    selection.selecting
+                      ? selection.toggle(tunnel.id)
+                      : setEditing(editExisting(tunnel.id))
                   }
                   tabIndex={selection.selecting ? -1 : undefined}
                   title={`${tunnel.localBindAddress}:${tunnel.localPort} → ${tunnel.remoteHost}:${tunnel.remotePort}`}
@@ -287,7 +295,7 @@ export function TunnelsPanel() {
                       </Menu.Item>
                       <Menu.Item
                         leftSection={<IconPencil size={14} />}
-                        onClick={() => setEditing(tunnel.id)}
+                        onClick={() => setEditing(editExisting(tunnel.id))}
                       >
                         Edit…
                       </Menu.Item>
@@ -295,7 +303,7 @@ export function TunnelsPanel() {
                         leftSection={<IconCopy size={14} />}
                         onClick={() => {
                           const copy = duplicateTunnel(tunnel.id);
-                          if (copy) setEditing(copy);
+                          if (copy) setEditing(editExisting(copy));
                         }}
                       >
                         Duplicate
@@ -317,7 +325,7 @@ export function TunnelsPanel() {
         )}
       </div>
 
-      <TunnelDialog tunnelId={editing} onClose={() => setEditing(null)} />
+      <TunnelDialog target={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }

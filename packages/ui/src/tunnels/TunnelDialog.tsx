@@ -23,7 +23,8 @@ import {
   type TunnelType,
 } from '@httpreq/shared';
 import { AppModal } from '../AppModal';
-import { VariableInput } from '../editor/VariableInput';
+import { Field } from '../auth/Field';
+import type { EditTarget } from '../editTarget';
 import { yieldToHostKeyPrompt } from '../ssh/hostKeyPrompt';
 import { useSsh } from '../ssh/useSsh';
 import { useWorkbenchStore } from '../store';
@@ -36,21 +37,27 @@ const TYPE_LABEL: Record<TunnelType, string> = {
 };
 
 interface Props {
-  tunnelId: string | null;
+  target: EditTarget<TunnelProfile> | null;
   onClose: () => void;
 }
 
 /**
- * Create or edit a tunnel profile.
+ * Create or edit a tunnel profile. A new tunnel lives only in this dialog until it is saved;
+ * closing it any other way discards it.
  *
  * The bind address defaults to loopback and warns as soon as it is changed: binding to another
  * interface puts the forwarded service on the network, which is rarely what someone means to do.
  */
-export function TunnelDialog({ tunnelId, onClose }: Props) {
+export function TunnelDialog({ target, onClose }: Props) {
   const saved = useWorkbenchStore((state) =>
-    state.workspace.tunnelProfiles.find((tunnel) => tunnel.id === tunnelId),
+    target?.kind === 'edit'
+      ? state.workspace.tunnelProfiles.find((tunnel) => tunnel.id === target.id)
+      : undefined,
   );
+  const initial = target?.kind === 'new' ? target.value : saved;
+  const isNew = target?.kind === 'new';
   const sshProfiles = useWorkbenchStore((state) => state.workspace.sshProfiles);
+  const create = useWorkbenchStore((state) => state.createTunnelProfile);
   const update = useWorkbenchStore((state) => state.updateTunnelProfile);
   const tunnels = useTunnels();
   const ssh = useSsh();
@@ -60,10 +67,10 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
   const [portTaken, setPortTaken] = useState(false);
 
   useEffect(() => {
-    setDraft(saved ? { ...saved } : null);
+    setDraft(initial ? { ...initial } : null);
     setShowErrors(false);
     setPortTaken(false);
-  }, [saved]);
+  }, [initial]);
 
   // Checked as the user types, so a conflict is visible before they try to start the tunnel.
   useEffect(() => {
@@ -97,17 +104,14 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
       setShowErrors(true);
       return;
     }
-    update(draft.id, {
+    const tunnel: TunnelProfile = {
+      ...draft,
       name: draft.name.trim(),
-      sshProfileId: draft.sshProfileId,
-      type: draft.type,
       localBindAddress: draft.localBindAddress.trim(),
-      localPort: draft.localPort,
       remoteHost: draft.remoteHost.trim(),
-      remotePort: draft.remotePort,
-      autoStart: draft.autoStart,
-      description: draft.description,
-    });
+    };
+    if (isNew) create(tunnel);
+    else update(tunnel.id, tunnel);
     onClose();
   };
 
@@ -115,7 +119,7 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
     <AppModal
       opened
       onClose={onClose}
-      title="SSH tunnel"
+      title={isNew ? 'New SSH tunnel' : 'SSH tunnel'}
       size="lg"
       centered
       // Starting a tunnel can raise the host-key question, which has to be answered first.
@@ -129,7 +133,7 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
         </>
       }
     >
-      <Stack gap="sm">
+      <Stack gap="sm" className="hr-form">
         <TextInput
           label="Tunnel name"
           placeholder="Production MySQL"
@@ -172,10 +176,12 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
           </Alert>
         )}
 
-        <Group grow align="flex-start">
+        <Group grow align="flex-start" wrap="nowrap">
           <TextInput
             label="Local bind address"
             description="127.0.0.1 keeps the tunnel on this machine."
+            // Below the input, so both inputs of the row start at the same height.
+            inputWrapperOrder={['label', 'input', 'description', 'error']}
             value={draft.localBindAddress}
             error={field('localBindAddress')}
             onChange={(event) => patch({ localBindAddress: event.currentTarget.value })}
@@ -223,26 +229,16 @@ export function TunnelDialog({ tunnelId, onClose }: Props) {
         )}
 
         {draft.type !== 'dynamic' && (
-          <Group grow align="flex-start">
-            <Stack gap={2}>
-              <Text size="sm" fw={500}>
-                Remote host
-              </Text>
-              <VariableInput
-                value={draft.remoteHost}
-                onChange={(remoteHost) => patch({ remoteHost })}
-                completion
-                mono
-                placeholder="mysql.internal"
-                aria-label="Remote host"
-                invalid={!!field('remoteHost')}
-              />
-              {field('remoteHost') && (
-                <Text size="xs" c="red">
-                  {field('remoteHost')}
-                </Text>
-              )}
-            </Stack>
+          <Group grow align="flex-start" wrap="nowrap">
+            <Field
+              label="Remote host"
+              value={draft.remoteHost}
+              onChange={(remoteHost) => patch({ remoteHost })}
+              completion
+              mono
+              placeholder="mysql.internal"
+              error={field('remoteHost')}
+            />
             <NumberInput
               label="Remote port"
               min={1}

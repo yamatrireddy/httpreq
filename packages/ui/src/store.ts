@@ -172,11 +172,13 @@ interface WorkbenchState {
   setActiveSshSession: (sessionId: string | null) => void;
   moveSshTab: (sessionId: string, toIndex: number) => void;
   /* Desktop connection profiles */
-  createSshProfile: () => string;
+  /** Adds a profile (a fresh one when none is given) and returns its id. */
+  createSshProfile: (profile?: SshProfile) => string;
   updateSshProfile: (id: string, patch: Partial<Omit<SshProfile, 'id' | 'credentialId'>>) => void;
   duplicateSshProfile: (id: string) => string | null;
   deleteSshProfile: (id: string) => void;
-  createTunnelProfile: (sshProfileId?: string) => string;
+  /** Adds a tunnel (a fresh one on the first SSH profile when none is given) and returns its id. */
+  createTunnelProfile: (tunnel?: TunnelProfile) => string;
   updateTunnelProfile: (id: string, patch: Partial<Omit<TunnelProfile, 'id'>>) => void;
   duplicateTunnelProfile: (id: string) => string | null;
   deleteTunnelProfile: (id: string) => void;
@@ -833,8 +835,7 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
 
   /* ---------- Desktop connection profiles ---------- */
 
-  createSshProfile: () => {
-    const profile = newSshProfile();
+  createSshProfile: (profile = newSshProfile()) => {
     set((state) => ({
       workspace: touch(state.workspace, { sshProfiles: [...state.workspace.sshProfiles, profile] }),
       sidebarView: 'ssh',
@@ -883,9 +884,9 @@ export const useWorkbenchStore = create<WorkbenchState>((set, get) => ({
       }),
     })),
 
-  createTunnelProfile: (sshProfileId) => {
+  createTunnelProfile: (tunnel) => {
     const state = get();
-    const profile = newTunnelProfile(sshProfileId ?? state.workspace.sshProfiles[0]?.id ?? '');
+    const profile = tunnel ?? newTunnelProfile(state.workspace.sshProfiles[0]?.id ?? '');
     set({
       workspace: touch(state.workspace, {
         tunnelProfiles: [...state.workspace.tunnelProfiles, profile],

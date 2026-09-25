@@ -60,6 +60,21 @@
   align-items: end;
 }
 
+/*
+ * Popup outlines. Mantine draws every popover-based dropdown (menus, selects, comboboxes, hover
+ * cards, variable suggestions) with a gray-2 / dark-4 border that nearly vanishes against the
+ * page, so they take the input border's colour instead. `.m_38a85659` is Mantine's shared popover
+ * dropdown class; the per-component static classes differ (Menu-, Select-, Combobox-dropdown…).
+ * The title bar's menus are drawn by MenuBar, not Mantine, and are unaffected.
+ */
+:root[data-mantine-color-scheme='light'] .m_38a85659 {
+  --popover-border-color: var(--mantine-color-gray-4);
+}
+
+:root[data-mantine-color-scheme='dark'] .m_38a85659 {
+  --popover-border-color: var(--mantine-color-dark-3);
+}
+
 /* Compact, theme-aware scrollbars in the style of desktop editors. */
 * {
   scrollbar-width: thin;

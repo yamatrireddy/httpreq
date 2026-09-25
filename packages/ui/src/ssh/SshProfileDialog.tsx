@@ -2,6 +2,7 @@ import {
   Alert,
   Button,
   Group,
+  Input,
   NumberInput,
   PasswordInput,
   Select,
@@ -11,7 +12,7 @@ import {
   Textarea,
 } from '@mantine/core';
 import { IconAlertTriangle, IconFolderOpen, IconPlugConnected } from '@tabler/icons-react';
-import { useEffect, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import {
   hasErrors,
   validateSshProfile,
@@ -20,7 +21,8 @@ import {
   type SshProfile,
 } from '@httpreq/shared';
 import { AppModal } from '../AppModal';
-import { VariableInput } from '../editor/VariableInput';
+import { Field } from '../auth/Field';
+import type { EditTarget } from '../editTarget';
 import { useWorkbenchStore } from '../store';
 import { yieldToHostKeyPrompt } from './hostKeyPrompt';
 import { useSsh } from './useSsh';
@@ -35,23 +37,30 @@ const secretLabel = (authType: SshAuthType) =>
   authType === 'password' ? 'Password' : 'Key passphrase';
 
 interface Props {
-  profileId: string | null;
+  target: EditTarget<SshProfile> | null;
   onClose: () => void;
 }
 
 /**
  * Create or edit an SSH connection profile.
  *
+ * A new profile lives only in this dialog until it is saved; closing it any other way discards it.
+ *
  * The secret field is write-only: an existing password or passphrase lives in the OS vault and is
  * never read back, so the field starts empty and shows whether one is already stored. Leaving it
  * empty keeps what is stored; typing replaces it; the "Remove" action clears it.
  */
-export function SshProfileDialog({ profileId, onClose }: Props) {
+export function SshProfileDialog({ target, onClose }: Props) {
   const ssh = useSsh();
   const saved = useWorkbenchStore((state) =>
-    state.workspace.sshProfiles.find((profile) => profile.id === profileId),
+    target?.kind === 'edit'
+      ? state.workspace.sshProfiles.find((profile) => profile.id === target.id)
+      : undefined,
   );
+  const create = useWorkbenchStore((state) => state.createSshProfile);
   const update = useWorkbenchStore((state) => state.updateSshProfile);
+  const isNew = target?.kind === 'new';
+  const initial = target?.kind === 'new' ? target.value : saved;
 
   const [draft, setDraft] = useState<SshProfile | null>(null);
   const [secret, setSecret] = useState('');
@@ -59,70 +68,91 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
   const [showErrors, setShowErrors] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testError, setTestError] = useState<SshErrorInfo | null>(null);
+  /** Set when testing a new, unsaved profile put its secret in the vault. */
+  const unsavedSecret = useRef(false);
+  const keyInputId = useId();
 
   useEffect(() => {
-    setDraft(saved ? { ...saved } : null);
+    setDraft(initial ? { ...initial } : null);
     setSecret('');
     setShowErrors(false);
     setTestError(null);
-    if (saved) void ssh.hasCredential(saved.credentialId).then(setHasStoredSecret);
+    unsavedSecret.current = false;
+    if (initial && !isNew) void ssh.hasCredential(initial.credentialId).then(setHasStoredSecret);
     else setHasStoredSecret(false);
-  }, [saved, ssh]);
+  }, [initial, isNew, ssh]);
 
   if (!draft) return null;
 
   const errors = validateSshProfile(draft);
   const field = (name: string) => (showErrors ? errors[name] : undefined);
   const patch = (changes: Partial<SshProfile>) => setDraft({ ...draft, ...changes });
+  const cleaned = (): SshProfile => ({
+    ...draft,
+    name: draft.name.trim(),
+    host: draft.host.trim(),
+    username: draft.username.trim(),
+  });
 
-  /** Persists the profile and, when one was typed, the secret. Returns whether it succeeded. */
-  const commit = async (): Promise<boolean> => {
+  /** Stores the secret, when one was typed, in the OS vault. Returns whether it succeeded. */
+  const storeSecret = async (): Promise<boolean> => {
+    if (!secret) return true;
+    const stored = await ssh.setCredential(draft.credentialId, secret);
+    if (!stored) {
+      setTestError({
+        code: 'SSH_UNKNOWN',
+        message:
+          'The credential could not be stored securely. This system has no available keychain, and HttpReq will not fall back to storing it in plain text.',
+      });
+      return false;
+    }
+    if (isNew) unsavedSecret.current = true;
+    setSecret('');
+    setHasStoredSecret(true);
+    return true;
+  };
+
+  /** Validates the form and stores the secret. Returns whether both succeeded. */
+  const prepare = async (): Promise<boolean> => {
     if (hasErrors(errors)) {
       setShowErrors(true);
       return false;
     }
-    update(draft.id, {
-      name: draft.name.trim(),
-      host: draft.host.trim(),
-      port: draft.port,
-      username: draft.username.trim(),
-      authType: draft.authType,
-      privateKeyPath: draft.privateKeyPath,
-      keepAliveSeconds: draft.keepAliveSeconds,
-      connectTimeoutMs: draft.connectTimeoutMs,
-      description: draft.description,
-    });
-    if (secret) {
-      const stored = await ssh.setCredential(draft.credentialId, secret);
-      if (!stored) {
-        setTestError({
-          code: 'SSH_UNKNOWN',
-          message:
-            'The credential could not be stored securely. This system has no available keychain, and HttpReq will not fall back to storing it in plain text.',
-        });
-        return false;
-      }
-      setSecret('');
-      setHasStoredSecret(true);
-    }
-    return true;
+    return storeSecret();
   };
 
   const onSave = async () => {
-    if (await commit()) onClose();
+    if (!(await prepare())) return;
+    const profile = cleaned();
+    // The store keeps the vault key and id fixed, so a saved profile can take the whole draft.
+    if (isNew) create(profile);
+    else update(profile.id, profile);
+    unsavedSecret.current = false;
+    onClose();
+  };
+
+  /** Closes without saving; a new profile leaves nothing behind, not even a tested secret. */
+  const onDiscard = () => {
+    if (unsavedSecret.current) void ssh.deleteCredential(draft.credentialId);
+    unsavedSecret.current = false;
+    onClose();
   };
 
   const onTest = async () => {
     setTestError(null);
-    if (!(await commit())) return;
+    if (!(await prepare())) return;
     setTesting(true);
-    // Tested against what was just saved, so the result reflects the stored credential.
-    setTestError(await ssh.test({ ...draft }));
+    // Tested against the stored credential. A saved profile keeps its edits once they are tested;
+    // a new one is tested as it stands and stays unsaved until "Save".
+    const profile = cleaned();
+    if (!isNew) update(profile.id, profile);
+    setTestError(await ssh.test(profile));
     setTesting(false);
   };
 
   const onRemoveSecret = async () => {
     await ssh.deleteCredential(draft.credentialId);
+    unsavedSecret.current = false;
     setHasStoredSecret(false);
     setSecret('');
   };
@@ -132,8 +162,8 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
   return (
     <AppModal
       opened
-      onClose={onClose}
-      title="SSH connection"
+      onClose={onDiscard}
+      title={isNew ? 'New SSH connection' : 'SSH connection'}
       size="lg"
       centered
       // "Test connection" can raise the host-key question, which has to be answered first.
@@ -151,14 +181,14 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
       }
       footer={
         <>
-          <Button variant="default" onClick={onClose}>
+          <Button variant="default" onClick={onDiscard}>
             Cancel
           </Button>
           <Button onClick={() => void onSave()}>Save</Button>
         </>
       }
     >
-      <Stack gap="sm">
+      <Stack gap="sm" className="hr-form">
         <TextInput
           label="Profile name"
           placeholder="Production bastion"
@@ -168,26 +198,16 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
           onChange={(event) => patch({ name: event.currentTarget.value })}
         />
 
-        <Group grow align="flex-start">
-          <Stack gap={2}>
-            <Text size="sm" fw={500}>
-              Host
-            </Text>
-            <VariableInput
-              value={draft.host}
-              onChange={(host) => patch({ host })}
-              completion
-              mono
-              placeholder="server.example.com or {{SSH_HOST}}"
-              aria-label="Host"
-              invalid={!!field('host')}
-            />
-            {field('host') && (
-              <Text size="xs" c="red">
-                {field('host')}
-              </Text>
-            )}
-          </Stack>
+        <Group grow align="flex-start" wrap="nowrap">
+          <Field
+            label="Host"
+            value={draft.host}
+            onChange={(host) => patch({ host })}
+            completion
+            mono
+            placeholder="server.example.com or {{SSH_HOST}}"
+            error={field('host')}
+          />
           <NumberInput
             label="Port"
             min={1}
@@ -198,25 +218,15 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
           />
         </Group>
 
-        <Stack gap={2}>
-          <Text size="sm" fw={500}>
-            Username
-          </Text>
-          <VariableInput
-            value={draft.username}
-            onChange={(username) => patch({ username })}
-            completion
-            mono
-            placeholder="ubuntu or {{SSH_USERNAME}}"
-            aria-label="Username"
-            invalid={!!field('username')}
-          />
-          {field('username') && (
-            <Text size="xs" c="red">
-              {field('username')}
-            </Text>
-          )}
-        </Stack>
+        <Field
+          label="Username"
+          value={draft.username}
+          onChange={(username) => patch({ username })}
+          completion
+          mono
+          placeholder="ubuntu or {{SSH_USERNAME}}"
+          error={field('username')}
+        />
 
         <Select
           label="Authentication"
@@ -227,29 +237,36 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
         />
 
         {needsKey && (
-          <Group align="flex-end" gap="xs">
-            <TextInput
-              style={{ flex: 1 }}
-              label="Private key"
-              description="The key stays where it is; HttpReq stores only its path."
-              placeholder="/home/you/.ssh/id_ed25519"
-              readOnly={ssh.available}
-              value={draft.privateKeyPath}
-              error={field('privateKeyPath')}
-              onChange={(event) => patch({ privateKeyPath: event.currentTarget.value })}
-            />
-            <Button
-              variant="default"
-              leftSection={<IconFolderOpen size={15} />}
-              onClick={() =>
-                void ssh.pickPrivateKey().then((path) => {
-                  if (path) patch({ privateKeyPath: path });
-                })
-              }
-            >
-              Choose…
-            </Button>
-          </Group>
+          <Input.Wrapper
+            label="Private key"
+            description="The key stays where it is; HttpReq stores only its path."
+            error={field('privateKeyPath')}
+            labelProps={{ htmlFor: keyInputId }}
+          >
+            {/* Bottom-aligned: the input carries a top margin below the description. */}
+            <Group gap="xs" wrap="nowrap" align="flex-end">
+              <Input
+                id={keyInputId}
+                style={{ flex: 1 }}
+                placeholder="/home/you/.ssh/id_ed25519"
+                readOnly={ssh.available}
+                value={draft.privateKeyPath}
+                error={!!field('privateKeyPath')}
+                onChange={(event) => patch({ privateKeyPath: event.currentTarget.value })}
+              />
+              <Button
+                variant="default"
+                leftSection={<IconFolderOpen size={15} />}
+                onClick={() =>
+                  void ssh.pickPrivateKey().then((path) => {
+                    if (path) patch({ privateKeyPath: path });
+                  })
+                }
+              >
+                Choose…
+              </Button>
+            </Group>
+          </Input.Wrapper>
         )}
 
         {draft.authType !== 'key' && (
@@ -284,7 +301,7 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
           </Stack>
         )}
 
-        <Group grow>
+        <Group grow align="flex-start" wrap="nowrap">
           <NumberInput
             label="Connect timeout (ms)"
             min={0}
@@ -298,6 +315,8 @@ export function SshProfileDialog({ profileId, onClose }: Props) {
           <NumberInput
             label="Keep-alive (seconds)"
             description="0 disables keep-alive probes."
+            // Below the input, so both inputs of the row start at the same height.
+            inputWrapperOrder={['label', 'input', 'description', 'error']}
             min={0}
             value={draft.keepAliveSeconds}
             onChange={(value) => patch({ keepAliveSeconds: typeof value === 'number' ? value : 0 })}

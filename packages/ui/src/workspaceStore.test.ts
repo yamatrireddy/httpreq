@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from 'vitest';
-import { createWorkspace } from '@httpreq/workspace';
+import { createTunnelProfile, createWorkspace } from '@httpreq/workspace';
 import {
   findWebSocketRequest,
   requestKind,
@@ -144,7 +144,7 @@ describe('desktop connection profiles', () => {
 
   it('names the tunnels that depend on an SSH profile', () => {
     const sshId = store().createSshProfile();
-    const tunnelId = store().createTunnelProfile(sshId);
+    const tunnelId = store().createTunnelProfile(createTunnelProfile(sshId));
     store().updateTunnelProfile(tunnelId, { name: 'MySQL' });
 
     expect(tunnelsUsingSshProfile(store().workspace, sshId).map((item) => item.name)).toEqual([
@@ -154,7 +154,7 @@ describe('desktop connection profiles', () => {
 
   it('unlinks dependent tunnels instead of deleting them with the profile', () => {
     const sshId = store().createSshProfile();
-    const tunnelId = store().createTunnelProfile(sshId);
+    const tunnelId = store().createTunnelProfile(createTunnelProfile(sshId));
     store().updateTunnelProfile(tunnelId, { autoStart: true });
     store().deleteSshProfile(sshId);
 
@@ -167,7 +167,7 @@ describe('desktop connection profiles', () => {
 
   it('does not let a duplicated tunnel start on its own, since the local port would clash', () => {
     const sshId = store().createSshProfile();
-    const tunnelId = store().createTunnelProfile(sshId);
+    const tunnelId = store().createTunnelProfile(createTunnelProfile(sshId));
     store().updateTunnelProfile(tunnelId, { name: 'MySQL', localPort: 3307, autoStart: true });
     store().duplicateTunnelProfile(tunnelId);
 
