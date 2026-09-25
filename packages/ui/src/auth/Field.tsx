@@ -8,7 +8,7 @@ interface Props extends Omit<VariableInputProps, 'id'> {
   error?: string;
 }
 
-/** A labelled variable-aware input for authorization and settings forms. */
+/** A labelled variable-aware input for `.hr-form` forms: authorization, settings, SSH and tunnels. */
 export function Field({ label, description, error, ...input }: Props) {
   const id = useId();
   return (

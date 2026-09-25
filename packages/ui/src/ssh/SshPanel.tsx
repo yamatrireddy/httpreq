@@ -9,8 +9,9 @@ import {
   IconTrash,
 } from '@tabler/icons-react';
 import { useMemo, useState } from 'react';
-import type { SshProfile } from '@httpreq/shared';
+import { createSshProfile as newSshProfile, type SshProfile } from '@httpreq/shared';
 import { confirmAction } from '../confirm';
+import { editExisting, editNew, type EditTarget } from '../editTarget';
 import { useConnectionsStore } from '../connections';
 import { tunnelsUsingSshProfile, useWorkbenchStore } from '../store';
 import { SshProfileDialog } from './SshProfileDialog';
@@ -28,12 +29,11 @@ import { useSelection } from '../explorer/useSelection';
 /** The SSH sidebar view: the workspace's connection profiles and their live sessions. */
 export function SshPanel({ onOpened }: { onOpened?: () => void }) {
   const profiles = useWorkbenchStore((state) => state.workspace.sshProfiles);
-  const createProfile = useWorkbenchStore((state) => state.createSshProfile);
   const duplicateProfile = useWorkbenchStore((state) => state.duplicateSshProfile);
   const deleteProfile = useWorkbenchStore((state) => state.deleteSshProfile);
   const sessions = useConnectionsStore((state) => state.sessions);
   const ssh = useSsh();
-  const [editing, setEditing] = useState<string | null>(null);
+  const [editing, setEditing] = useState<EditTarget<SshProfile> | null>(null);
   const selection = useSelection(useMemo(() => profiles.map((profile) => profile.id), [profiles]));
 
   const liveCount = (profileId: string) =>
@@ -105,7 +105,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
             color="gray"
             size="sm"
             aria-label="New SSH connection"
-            onClick={() => setEditing(createProfile())}
+            onClick={() => setEditing(editNew(newSshProfile()))}
           >
             <IconPlus size={15} />
           </ActionIcon>
@@ -129,7 +129,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
               size="xs"
               variant="light"
               leftSection={<IconPlus size={14} />}
-              onClick={() => setEditing(createProfile())}
+              onClick={() => setEditing(editNew(newSshProfile()))}
             >
               New connection
             </Button>
@@ -166,7 +166,9 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                   }}
                   onDoubleClick={() => !selection.selecting && connect(profile)}
                   onClick={() =>
-                    selection.selecting ? selection.toggle(profile.id) : setEditing(profile.id)
+                    selection.selecting
+                      ? selection.toggle(profile.id)
+                      : setEditing(editExisting(profile.id))
                   }
                   tabIndex={selection.selecting ? -1 : undefined}
                   title={`${profile.username || 'user'}@${profile.host || 'host'}:${profile.port}`}
@@ -205,7 +207,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                     <Menu.Dropdown>
                       <Menu.Item
                         leftSection={<IconPencil size={14} />}
-                        onClick={() => setEditing(profile.id)}
+                        onClick={() => setEditing(editExisting(profile.id))}
                       >
                         Edit…
                       </Menu.Item>
@@ -213,7 +215,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
                         leftSection={<IconCopy size={14} />}
                         onClick={() => {
                           const copy = duplicateProfile(profile.id);
-                          if (copy) setEditing(copy);
+                          if (copy) setEditing(editExisting(copy));
                         }}
                       >
                         Duplicate
@@ -235,7 +237,7 @@ export function SshPanel({ onOpened }: { onOpened?: () => void }) {
         )}
       </div>
 
-      <SshProfileDialog profileId={editing} onClose={() => setEditing(null)} />
+      <SshProfileDialog target={editing} onClose={() => setEditing(null)} />
     </div>
   );
 }
